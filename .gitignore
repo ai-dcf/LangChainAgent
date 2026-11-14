@@ -2,3 +2,6 @@
 资料/
 .venv/
 .env
+
+# Local checkpoint database
+/LangChain入门笔记/07-LangChain-短期记忆与存储策略/notebools/checkpoints.sqlite*
