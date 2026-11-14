@@ -1,0 +1,4 @@
+# Project exclude paths
+资料/
+.venv/
+.env
