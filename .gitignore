@@ -5,3 +5,6 @@
 
 # Local checkpoint database
 /LangChain入门笔记/07-LangChain-短期记忆与存储策略/notebools/checkpoints.sqlite*
+
+# Chapter 08 local long-term memory databases
+/LangChain入门笔记/08-LangChain-长期记忆管理/data/*.sqlite*
