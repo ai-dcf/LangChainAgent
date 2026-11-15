@@ -12,3 +12,7 @@
 # Chapter 09 generated files, source records, databases and verification artifacts
 /LangChain入门笔记/09-LangChain-上下文管理/data/
 /LangChain入门笔记/09-LangChain-上下文管理/notebooks/__pycache__/
+
+# Chapter 10 local model traces and verification reports
+/LangChain入门笔记/10-LangChain-任务规划/data/
+/LangChain入门笔记/10-LangChain-任务规划/notebooks/__pycache__/
