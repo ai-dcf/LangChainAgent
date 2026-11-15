@@ -8,3 +8,7 @@
 
 # Chapter 08 local long-term memory databases
 /LangChain入门笔记/08-LangChain-长期记忆管理/data/*.sqlite*
+
+# Chapter 09 generated files, source records, databases and verification artifacts
+/LangChain入门笔记/09-LangChain-上下文管理/data/
+/LangChain入门笔记/09-LangChain-上下文管理/notebooks/__pycache__/
