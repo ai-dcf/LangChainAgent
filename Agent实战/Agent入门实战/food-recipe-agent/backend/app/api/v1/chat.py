@@ -1,4 +1,7 @@
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
+
+from app.agents.personal_chief import stream_chat, get_messages, clear_messages
 from app.models.schemas import ChatRequest
 
 router = APIRouter()
@@ -7,16 +10,22 @@ router = APIRouter()
 @router.post("/chat/stream")
 async def chat_endpoint(request: ChatRequest):
     """流式对话"""
-    pass
+    return StreamingResponse(
+        stream_chat(request.message, request.image_url, request.thread_id),
+        media_type="text/event-stream",
+    )
 
 
 @router.get("/chat/messages")
 async def get_chat_messages(thread_id: str):
     """获取历史消息"""
-    pass
+    messages = get_messages(thread_id)
+    return {"messages": messages}
+
 
 
 @router.delete("/chat/messages")
 async def clear_chat_messages(thread_id: str):
     """清空历史消息"""
-    pass
+    clear_messages(thread_id)
+    return {"success": True}
