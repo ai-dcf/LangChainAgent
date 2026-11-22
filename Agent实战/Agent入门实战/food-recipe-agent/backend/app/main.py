@@ -29,7 +29,7 @@ app.add_middleware(
 
 # 2.挂载路由
 app.include_router(chat.router, prefix="/api/v1", tags=["对话"])
-app.include_router(oss.router, prefix="/api/v1", tags=["申请上传签名url"])
+app.include_router(oss.router, prefix="/api/v1", tags=["申请上L传签名url"])
 
 # 3.挂载前端资源
 static_dir = os.path.join(os.path.dirname(__file__), "static")

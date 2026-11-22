@@ -2,6 +2,8 @@
 资料/
 .venv/
 .env
+.idea/
+__pycache__/
 
 # Local checkpoint database
 /LangChain入门笔记/07-LangChain-短期记忆与存储策略/notebools/checkpoints.sqlite*
@@ -16,3 +18,6 @@
 # Chapter 10 local model traces and verification reports
 /LangChain入门笔记/10-LangChain-任务规划/data/
 /LangChain入门笔记/10-LangChain-任务规划/notebooks/__pycache__/
+/agent/实战-AI私厨管家/resources/personal_chief.db
+/agent/实战-AI私厨管家/resources/personal_chief.db-shm
+/agent/实战-AI私厨管家/resources/personal_chief.db-wal
