@@ -1,6 +1,8 @@
-# 3. 模型（Models）
+# LangChain 模型初始化
 
-在入门案例中我们通过`create_agent`创建Agent，直接指定模型名就可以了，非常方便。但模型的参数却都是默认参数，无法修改。
+在入门案例中我们通过`create_agent`创建Agent，直接指定模型名就可以了，非常方便。
+
+但模型的参数却都是默认参数，无法修改。
 
 如果要自定义模型参数，就需要单独初始化模型了。
 
@@ -132,7 +134,7 @@ LangChain会根据名称推断`model_provider`、`base_url`，并去环境变量
 
 
 
-例如，我们要访问阿里云百炼的qwen模型，它就是不被langchain支持的模型，我们必须自定义模型参数来访问。
+例如，通过阿里云百炼的 OpenAI 兼容接口访问千问，需要显式选择 OpenAI 集成并配置百炼的端点与密钥。
 
 * 我们需要在环境变量中定义**api\_key**和**base\_url**
 
@@ -188,7 +190,9 @@ LangChain会根据名称推断`model_provider`、`base_url`，并去环境变量
   print(response)
   ```
 
-注意，由于qwen不被支持，但兼容OpenAI，所以`model_provider`用openai，但`base_url`和`api_key`就是阿里云自己的了。
+`model_provider="openai"` 选择 LangChain 的 OpenAI 集成。请求发往 `DASHSCOPE_BASE_URL` 指定的百炼端点，并使用 `DASHSCOPE_API_KEY` 认证。
+
+[切换模型示例](./03-switch-model.py) 使用同一套百炼配置，让两个模型回答同一个问题。
 
 
 
@@ -196,7 +200,7 @@ LangChain会根据名称推断`model_provider`、`base_url`，并去环境变量
 
 ### 3.1.3 Model初始化
 
-某些模型提供商并不兼容OpenAI规范，也不被init\_chat\_model默认初始化支持，就必须使用专用的Model类来初始化了。
+也可以直接实例化提供商的聊天模型类。访问本地 Ollama 时，可以使用 `ChatOllama`。
 
 例如：Ollama
 
@@ -206,7 +210,7 @@ LangChain会根据名称推断`model_provider`、`base_url`，并去环境变量
 uv add langchain-ollama
 ```
 
-然后，就可以利用它访问本地Ollama部署的任何模型了：
+启动 Ollama 后，先执行 `ollama pull qwen3.5:0.8b` 下载示例模型。
 
 ```python
 from langchain_ollama import ChatOllama
@@ -243,7 +247,7 @@ LangChain提供了两个不同的方法来调用模型：
 
 
 
-不过模型调用通常都是采用invoke阻塞调用，示例：
+下面演示 invoke 的两种输入。运行 [普通调用示例](./05-model-invoke.py) 可以一次拿到完整回复，运行 [流式调用示例](./06-model-stream.py) 可以看到回复逐段输出。
 
 ```python
 from langchain.chat_models import init_chat_model
@@ -253,7 +257,7 @@ load_dotenv()
 
 # 2.调用init_chat_model函数初始化模型
 model = init_chat_model(
-    model="deepseek-v4-flash",
+    model="deepseek-flash",
     extra_body={"thinking": {"type": "disabled"}}
 )
 
@@ -326,7 +330,7 @@ load_dotenv()
 
 # 2.初始化模型
 model = init_chat_model(
-    model="deepseek-v4-flash",
+    model="deepseek-flash",
     extra_body={"thinking": {"type": "disabled"}}
 )
 
@@ -366,13 +370,13 @@ print(response)
 ```python
 from dotenv import load_dotenv
 from langchain.chat_models import init_chat_model
-from langchain.messages import HumanMessage, SystemMessage, AIMessage
+from langchain.messages import HumanMessage
 # 1.准备和加载环境变量
 load_dotenv()
 
 # 2.初始化模型 init_chat_model
 model = init_chat_model(
-    model="deepseek-v4-flash",
+    model="deepseek-flash",
     extra_body={
         "thinking": {
             "type": "disabled"
@@ -385,12 +389,12 @@ from pydantic import BaseModel, Field
 
 class CapitalInfo(BaseModel):
     name: str = Field(description="首都的名字")
-    location: str = Field(description="The location of che capital")
-    vibe: str = Field(description="The vibe of che capital")
-    economy: str = Field(description="The economy source of che capital")
+    location: str = Field(description="城市在月球上的位置")
+    vibe: str = Field(description="城市的风格和生活氛围")
+    economy: str = Field(description="城市的主要产业和经济来源")
 
 # 4.将BaseModel类与模型绑定，要求输出结构化结果
-model_with_structured_output = model.with_structured_output(schema=CapitalInfo)
+model_with_structured_output = model.with_structured_output(CapitalInfo, method="function_calling")
 
 # 5.调用模型
 response = model_with_structured_output.invoke([
@@ -401,9 +405,9 @@ print(type(response)) # <class '__main__.CapitalInfo'>
 print(response)
 ```
 
-注意，在输出的结果中，有一个'structured\_response'的字段，就是结构化输出的对象：
+这里直接调用绑定了 Pydantic 模型的聊天模型，返回值是经过校验的 `CapitalInfo` 实例。
 
-```python
+```text
 <class '__main__.CapitalInfo'>
 name='广寒城 (Guanghan City)' location='月球正面第谷环形山（Tycho Crater），位于南纬43度，西经11度，建于环形山内部穹顶之下' vibe='赛博朋克与东方古典美学的融合——全息投影的琉璃瓦屋顶、悬浮的霓虹灯笼、街道两旁延伸的透明穹顶外是永恒的星空。城市分为七层垂直结构，最底层是工业区与贫民窟，顶层是执政院与富商宅邸。空气中飘着合成茉莉花香，全息广告用古汉语、英语和月球通用语轮流播放。' economy='氦-3采矿（能源出口地球）、月球旅游业（零重力观光、地球升起观景台）、尖端量子计算芯片制造、月球地产与高空土地交易、地下农场粮食自给'
 ```

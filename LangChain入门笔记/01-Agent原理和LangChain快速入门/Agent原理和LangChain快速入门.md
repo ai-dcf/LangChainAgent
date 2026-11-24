@@ -1,533 +1,334 @@
-## 1. 认识Agent
+# LangChain 入门笔记 01：Agent 原理与快速入门
 
-### 1.1 什么是Agent
+本文是《LangChain入门笔记》系列的第一篇。
 
-什么是Agent，这其实没有一个标准的答案，每个人都有自己的理解。
+“今天是几月几号？”——对能看一眼时钟的人来说，这是最简单的问题；对大语言模型（LLM）来说却未必。它可能给出一个日期，也可能说无法确认。即使答对了，你也无从判断这个日期从哪里来。
 
-对于这个问题，LangChain创始人[Harrison Chase](https://www.blog.langchain.com/tag/harrison-chase/)有一个偏向技术性的答案：
+这道题很适合拿来拆开 Agent 看。接下来我们用同一道题走三遍：直接问模型，看它在没有外部信息时会怎么回答；手写一个能按需读取系统时钟的 Agent，看模型和程序之间究竟要传递些什么；最后用 LangChain 重写同一个例子，看框架替我们省掉了哪些重复劳动。
 
-> An AI agent is a system that uses an LLM to decide the control flow of an application.
->
-> Agent是一种使用大语言模型（LLM）来决定应用程序控制流的系统。
+不需要预先准备任何仓库。文章从一个空目录开始，带你把项目建起来、依赖装上、代码跑通。读完你会拿到三个能运行的小程序，更重要的是能回答：Agent 到底比单独的 LLM 多了什么？自己写一个要多少代码？LangChain 又能省掉哪些？
 
+## 1.1 先想清楚：模型为什么答不准“今天”
 
+理解 LLM 的局限，可以从三个问题入手。模型在训练中学到了什么？这次推理能用到哪些信息？下一次调用时，谁负责把前面的信息接上？
 
-在人工智能领域，**Agent**（通常翻译为**智能体**或**代理**）是指**一种能够感知环境、进行推理、自主决策并采取行动以实现特定目标的智能系统。**
+1. **训练知识有时效。** 模型的参数反映了训练时学到的信息。训练之后发生的事件、此刻的库存、用户刚提交的订单等事实，需要在回答时从可用的上下文或外部来源获得。
+2. **访问外部资源需要宿主提供能力。** 模型可以处理传入的文本，支持多模态的模型也可以处理图像等内容。如果应用提供了工具，模型还可以发出结构化的工具请求，由应用或服务执行。读取本机时钟、查询数据库等操作都需要运行环境提供访问途径。
+3. **对话连续性依赖调用方或服务。** 一次独立的模型调用只能利用这次推理时可用的上下文。多轮对话通常由应用带上历史消息，或由托管服务保存历史并在后续调用中取回。
 
+“今天是几月几号”同时涉及训练知识的时效和外部信息的访问。模型可以解释“今天”的含义，确定当前日期则需要知道回答时刻和所用时区。接下来的直调实验只发送问题，随后两遍再让模型有机会请求运行脚本的机器读取本地时间。
 
+![模型依据训练中学到的知识和本次上下文生成回答。应用或服务可以把外部数据与历史消息加入上下文。](./images/llm-information-sources-handdrawn.png)
 
-| **特性&#x20;** | **传统聊天机器人/LLM** | **AI Agent**                   |
-| -------------- | ---------------------- | ------------------------------ |
-| **交互模式**   | 被动响应，问一句答一句 | 主动规划，以目标为导向         |
-| **执行力**     | 停留在文本生成层面     | 能操作软件、发送邮件、分析数据 |
-| **自主性**     | 需要人类给出详细步骤   | 只需给定最终目标，自主寻找路径 |
+图 1 展示了训练知识、本次上下文和外部资源的关系。本篇的直调实验只把问题文本放入上下文。
 
+## 1.2 从空目录开始：项目、依赖与配置
 
+理论说完了，现在把能跑的现场搭起来。这个系列会持续往同一个项目里加内容，所以先建一个项目根目录，再把本篇的代码放进它自己的章节目录。第一篇只用到下面这一小块，后续篇章会照着同样的样子往里加。
 
-![](./images/image-11.png)
+先建项目，并进入目录：
 
-如果说大模型（LLM）是“大脑”，那么 Agent 就&#x662F;**“拥有手脚和思维逻辑的独立个体”**。
-
-它不再只是被动地回答问题，而是能主动拆解任务并调用各种工具来完成工作。
-
-
-
-例如：要开发一个《AI旅游助手》的应用。
-
-![](./images/image-10.png)
-
-
-
-
-
-如果是**传统LLM应用**，程序流程是这样的：
-
-> 1. 用户提出需求，例如：帮我计划一个5天的北京之旅，预算8000元，我喜欢历史。
->
-> 2. 调用LLM，分析用户需求，直接由LLM生成一个简单旅游计划
-
-这个计划基于它训练数据中的通用知识，可能没有考虑当前的天气、景点是否关闭、门票是否可预订等实时信息。
-
-
-
-
-
-如果是**Agent应用**，Agent可以自主规划程序流程：
-
-> 1. 用户提出需求，例如：帮我计划一个5天的北京之旅，预算8000元，我喜欢历史。
->
-> 2. Agent分析用户需求，分步执行：
->
->    1. 规划： 将大目标分解为：查询机票酒店价格 -> 查询天气和景点信息 -> 设计每日行程 -> 计算总预算。
->
->    2. 调用工具：
->
->       * 调用机票/酒店API，查询用户指定日期范围内的价格和可选酒店。
->
->       * 调用天气预报API，查询未来5天北京的天气，建议携带的衣物。
->
->       * 调用搜索引擎/景点API，查询故宫、国博等热门景点的最新开放时间、预约政策和当前展览。
->
->    3. 感知与反馈： 综合感知所有查询到的实时信息，生成一个动态的、可执行的计划。例如：“根据预算和您对历史的兴趣，我推荐入住胡同里的XX酒店。第一天去故宫，但请注意下周一故宫闭馆，所以调整到第二天……总花费预计7500元，还在预算内。需要我现在帮您预订酒店和机票吗？”
-
-Agent通过主动规划任务流程，主动使用工具，整合了实时信息，并进行了动态调整，最终产出的是一个真正可落地的方案。
-
-
-
-总结如下：
-
-* LLM = 聪明的大脑
-
-* Agent = 聪明的大脑 + 工具（手脚）
-
-
-
-那么问题来了：
-
-> 工具该如何定义呢？
->
-> LLM如何调用工具呢？
-
-
-
-### 1.2 ToolCalling原理
-
-工具的本质就是函数：
-
-* 一个查询天气的函数，就是查天气工具
-
-* 一个查询机票的函数，就是查机票工具
-
-* ...
-
-
-
-例如，我们来定义一个函数：
-
-```python
-def get_weather(location: str) -> str:
-    """
-    Get the weather in a given location.
-    Args:
-        location: city name or coordinates
-    """
-    return f"Current weather in {location} is sunny"
+```bash
+uv init LangChainAgent
+cd LangChainAgent
 ```
 
-现在，这就是一个查询天气的工具。
+`uv init` 会生成一个最小的 `pyproject.toml`，用来声明项目信息和依赖。接着用 `uv add` 装依赖，它会自动更新这个文件，并生成 `uv.lock` 锁定版本：
 
-但大家思考一下，**工具是在本地自己定义的，而模型则是在服务器上运行**的（比如DeepSeek）。
-
-那么问题来了：
-
-> * 模型如何知道我们有哪些工具？
->
-> * 模型又该如何调用我们的工具呢？
-
-
-
-其实调用函数只需要知道函数名和参数类型就可以了，模型在云端，无法调用我们，所以只能换一个思路：
-
-* 让模型知道我们的工具(函数名称、参数名）
-
-* 让模型把想调用的工具和参数（函数名、参数值）返回给我们
-
-
-
-要解决这个问题，就需要用到ToolCalling技术了。原理如图：
-
-![image-20261114065739589](./images/image-20261114065739589.png)
-
-其实思路并不复杂，流程是这样的：
-
-1. 我们在本地定义get\_weather这样的工具函数（可以有多个）
-
-2. 用户询问杭州天气
-
-3. 我们把工具对应的函数名、函数参数格式、用户问题组织在一起作为请求参数，发送给模型
-
-4. 模型根据用户问题判断：
-
-   1. 是否需要调用工具
-
-   2. 要调用哪个工具
-
-5. 模型返回工具信息，包括：要调用的函数名、参数
-
-6. 我们根据函数名找到函数，调用函数，传入参数，得到结果
-
-7. 把工具执行结果结合用户问题发送给模型，由模型分析结果，是否足以回答
-
-   1. 足够，直接生成答案
-
-   2. 不足，回到4（继续调用其它工具）
-
-
-
-其实，在大模型提供的API接口中，有一个tools参数，描述了工具的详细信息：
-
-![](./images/image.png)
-
-当模型判断需要调用工具时，在返回的结果中，就会有要调用的工具信息：
-
-![](./images/image-1.png)
-
-所以，我们只需要这么几件事情：
-
-* 在调用LLM时传入toos参数，把工具信息发给LLM
-
-* 在LLM返回结果中找到tool\_calls，找到要调用的function的name和arguments，然后调用function
-
-* 把function结果发给LLM，让LLM生成自然语言回答
-
-
-
-### 1.3 ToolCalling代码演示
-
-接下来，我们就基于ToolCalling的原理，来手搓一个Agent，不过首先我们需要安装一些依赖：
-
-```python
-uv add openai
+```bash
+uv add openai python-dotenv langchain langchain-deepseek
 ```
 
-然后，在`notebooks`目录下新建一个`day05`，再新建一个`1.tool_calling.ipynb`文件：
+`openai` 用来调用 DeepSeek 的兼容接口，`python-dotenv` 读取 `.env`，`langchain` 和 `langchain-deepseek` 用于最后的框架版。装完依赖后，在项目根目录创建本篇的代码目录。
 
-![](./images/image-2.png)
+```bash
+uv run python -c "from pathlib import Path; Path('LangChain入门笔记/01-Agent原理和LangChain快速入门').mkdir(parents=True, exist_ok=True)"
+```
 
-示例代码：
+完成本篇后，项目里的相关文件如下。配套仓库另有 `notebooks/` 和 `images/`。
+
+```text
+LangChainAgent/
+├── .env                  # API 密钥，自己创建
+├── .gitignore            # 加入 /.env
+├── pyproject.toml        # uv 生成，声明依赖
+├── uv.lock               # uv add 生成，锁定版本
+└── LangChain入门笔记/      # 系列笔记，按篇分目录
+    └── 01-Agent原理和LangChain快速入门/   # 本篇
+        ├── 01-llm-call.py      # 第一遍：直接问模型
+        ├── 02-manual-agent.py  # 第二遍：手写 Agent
+        └── 03-agent-call.py    # 第三遍：LangChain 版
+```
+
+先在项目根目录的 `.gitignore` 末尾加上 `/.env`。如果项目使用 Git，在根目录运行 `git check-ignore .env`，应看到输出 `.env`。
+
+确认后，在项目根目录创建 `.env`，填入自己的 DeepSeek API 密钥。`python-dotenv` 会从脚本所在目录向上查找这个文件。
+
+```dotenv
+DEEPSEEK_API_KEY=你的实际密钥
+```
+
+三个示例都用 DeepSeek 的 `deepseek-flash`，并关闭思考模式，方便观察模型回答和工具请求的结构。 [DeepSeek API 调用指南](https://api-docs.deepseek.com/) · [DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode/)
+
+如果你已有配套仓库，三个脚本和 Git 忽略规则都已就绪。直接在仓库根目录运行 `uv sync --locked` 安装锁定的依赖，然后创建本地 `.env` 并填入密钥。本篇的三个运行命令都从项目根目录执行。
+
+## 1.3 第一遍：直接问模型
+
+只给模型一个问题，既不提供当前日期，也不接入时钟工具，它会怎么回答？
+
+从零搭建项目时，把下面的代码保存到章节目录，文件名为 `01-llm-call.py`。配套仓库已提供 [01-llm-call.py](./01-llm-call.py)。在项目根目录运行：
+
+```bash
+uv run "LangChain入门笔记/01-Agent原理和LangChain快速入门/01-llm-call.py"
+```
 
 ```python
-import json
 import os
-from openai import OpenAI
+
 from dotenv import load_dotenv
+from openai import OpenAI
+
 load_dotenv()
 
+client = OpenAI(
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    base_url="https://api.deepseek.com",
+)
 
-# ==================== 1. 定义工具 ====================
-def get_weather(location: str) -> str:
-    return f"Current weather in {location} is sunny"
+response = client.chat.completions.create(
+    model="deepseek-flash",
+    messages=[{"role": "user", "content": "今天是几月几号"}],
+    extra_body={"thinking": {"type": "disabled"}},
+)
 
-def square_root(x: float) -> float:
-    return x ** 0.5
+print(response.choices[0].message.content)
+```
 
-# 把函数放到dict中，方便根据函数名查找
-tools_by_name = {"get_weather": get_weather, "square_root": square_root}
+脚本只发送了一条用户消息，也没有注册工具。模型可能给出日期，也可能说无法确认。即使日期答对了，仅凭这次请求和输出，也无法把答案追溯到运行脚本的机器时钟。
 
-# ==================== 2. 定义工具的LLM描述 ====================
+碰到固定流程，比如“收到问题就先读时钟，再把日期交给模型组织措辞”，这么写就够了。但如果同一个入口要回答各种问题，“这次要不要查时间”就不该由你预先写死，而该让模型根据问题自己判断。要做到这一点，得给模型加上 tools。
+
+## 1.4 Agent 是什么：模型、工具与循环
+
+任务需要读时钟、查数据库或调接口时，应用可以把这些操作注册成工具。模型根据当前上下文请求动作，程序执行并回传结果，模型再决定下一步。围绕模型组织工具和执行循环，就构成了本篇要实现的 Agent。
+
+这套结构有三块：
+
+1. **模型负责判断。** 它读当前上下文，判断这一轮该直接回答，还是请求某个工具。模型依然是 LLM，能力边界没有变，变的是它多了一个“可以请求动作”的选项。
+2. **工具负责执行。** 工具把外部能力（读时钟、查库、发请求）包装成模型可以请求的接口，附带名称、用途和参数说明。模型发出工具请求，真正的执行由程序完成。
+3. **循环与状态负责驱动。** 程序执行工具、回填结果、再次调用模型，直到模型不再请求工具。本例用 `messages` 保存运行中的对话历史，并把它与工具说明一起提供给下一次模型调用。这里的“上下文”指模型当前可用的信息。LangChain 进阶篇还会介绍单独注入的 Runtime Context。
+
+把三块串起来，一次运行大概是这样：用户问题进入消息列表 → 模型读到工具说明，输出一条工具请求 → 程序按请求找到并执行工具，拿到结果 → 程序把结果作为新消息追加进列表，并标明它对应哪次请求 → 模型看到更新后的历史，再决定是继续请求工具，还是给出最终回答 → 直到某一轮没有工具请求为止。每一轮模型读到的，都是更新后的同一份上下文，工具结果正是靠回填进这里才被模型"看见"。这就是 ReAct 论文里"推理—行动—观察"交替的思路：模型不是一口气给出答案，而是看到结果后再决定下一步。
+
+它适合需要运行时事实、多步操作、按情况走不同路径的任务。流程固定的任务不必用它——直接写程序更短也更可控；对延迟和确定性要求高的场景也要谨慎，模型决策本身带不确定性。另外还多出三类失败点：工具没注册、参数解析失败、循环不收敛。用了 Agent，就等于把模型的不确定性从“答案怎么措辞”扩展到了“下一步走哪条路”。
+
+![什么是 Agent？模型可以直接回答，也可以请求工具。程序按名称和参数执行工具，用 tool_call_id 关联请求，把结果写回 messages，再交给模型判断。](./images/what-is-an-agent-handdrawn.png)
+
+图 2 展示了 Agent 的三个组成部分。模型判断下一步，工具执行外部操作，循环与状态负责记录结果、将结果交回模型并推进任务。
+
+手写版把三块逻辑摆在一起：工具函数、工具说明、维护消息列表并反复调用模型的循环。从零搭建项目时，把代码保存到章节目录，文件名为 `02-manual-agent.py`。配套仓库已提供 [02-manual-agent.py](./02-manual-agent.py)。在项目根目录运行：
+
+```bash
+uv run "LangChain入门笔记/01-Agent原理和LangChain快速入门/02-manual-agent.py"
+```
+
+```python
+import datetime
+import json
+import os
+
+from dotenv import load_dotenv
+from openai import OpenAI
+
+load_dotenv()
+
+client = OpenAI(
+    api_key=os.environ["DEEPSEEK_API_KEY"],
+    base_url="https://api.deepseek.com",
+)
+
+
+def current_time() -> str:
+    """获取当前时间。"""
+    return str(datetime.datetime.now())
+
+
+tools_by_name = {"current_time": current_time}
 tools = [
     {
         "type": "function",
         "function": {
-            "name": "get_weather",
-            "description": "Get weather of a location, the user should supply a location first.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "location": {
-                        "type": "string",
-                        "description": "The city and state, e.g. San Francisco, CA",
-                    }
-                },
-                "required": ["location"]
-            },
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "square_root",
-            "description": "Calculate the square root of a given number.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "x": {
-                        "type": "number",
-                        "description": "The number to calculate square root for",
-                    }
-                },
-                "required": ["x"]
-            },
-        }
+            "name": "current_time",
+            "description": "获取当前时间。",
+            "parameters": {"type": "object", "properties": {}},
+        },
     },
 ]
 
-# ==================== 3. LLM客户端 ====================
-client = OpenAI(
-    api_key=os.getenv('DEEPSEEK_API_KEY'),
-    base_url="https://api.deepseek.com"
-)
 
-# ==================== 4. 定义发送消息的方法 ====================
-def send_messages(messages):
-    response = client.chat.completions.create(
-        model="deepseek-v4-flash",
-        messages=messages,
-        tools=tools,
-        extra_body={"thinking": {"type": "disabled"}}
-    )
-    return response.choices[0].message
+def run_agent(question: str) -> str:
+    messages = [{"role": "user", "content": question}]
 
-# ==================== 5. 定义执行Tool调用的方法 ====================
-def execute_tool(message, messages):
-    """解析Tool信息，执行对应的函数，并将结果追加到消息列表"""
-    tool_call = message.tool_calls[0]
-    tool_id = tool_call.id
-    tool_name = tool_call.function.name
-    tool_args = json.loads(tool_call.function.arguments)
+    for _ in range(5):
+        response = client.chat.completions.create(
+            model="deepseek-flash",
+            messages=messages,
+            tools=tools,
+            tool_choice="auto",
+            extra_body={"thinking": {"type": "disabled"}},
+        )
+        message = response.choices[0].message
+        messages.append(message)
 
-    print(f"调用工具: {tool_name}, 参数: {tool_args}")
+        if not message.tool_calls:
+            return message.content or ""
 
-    # 根据函数名找到对应函数并执行
-    result = tools_by_name[tool_name](**tool_args)
-    print(f"工具结果: {result}")
+        for call in message.tool_calls:
+            name = call.function.name
+            tool = tools_by_name.get(name)
+            if tool is None:
+                raise ValueError(f"未注册的工具：{name}")
 
-    # 将AI消息和Tool结果追加到消息列表
-    messages.append(message)
-    messages.append({
-        "role": "tool",
-        "tool_call_id": tool_id,
-        "content": result
-    })
-    return messages
+            arguments = json.loads(call.function.arguments)
+            print(f"工具请求：{name}，参数：{call.function.arguments}")
+            result = tool(**arguments)
+            print(f"工具结果：{result}")
 
-# ==================== 6. 主流程 ====================
-# 准备用户消息
-messages = [{"role": "user", "content": "杭州天气怎么样?"}]
-print(f"User> {messages[0]['content']}")
+            messages.append(
+                {"role": "tool", "tool_call_id": call.id, "content": result}
+            )
 
-# 第一次调用LLM，获取ToolCall
-message = send_messages(messages)
-print(f"Tool> {message.tool_calls[0]}")
+    raise RuntimeError("达到 5 次模型调用，仍未生成最终回答。")
 
-# 执行Tool并将结果传回LLM
-messages = execute_tool(message, messages)
 
-# 再次调用LLM，生成最终答案
-message = send_messages(messages)
-print(f"AI> {message.content}")
+print(f"最终回答：{run_agent('今天是几月几号')}")
 ```
 
+模型选择调用工具时，输出类似这样。时间来自运行脚本的机器，日期和措辞会随运行变化。
 
+```text
+工具请求：current_time，参数：{}
+工具结果：2026-11-24 21:44:05.338296
+最终回答：今天是 11 月 24 日。
+```
 
+输出里三个字段对应三要素：`tool_calls` 是模型发出的工具请求；`role="tool"` 和 `tool_call_id` 把程序执行的结果回填进消息列表，并关联到对应请求；最终回答来自模型读完更新后历史的下一次决策。循环最多五轮，超了就报错——这是“循环与状态”落在工程上的落点。 [DeepSeek 工具调用文档](https://api-docs.deepseek.com/guides/tool_calls/) · [ReAct 原论文](https://arxiv.org/abs/2210.03629)
 
+## 1.5 两条路径对比与选择
 
-### 1.4 总结
+把两条路径放在一起看，差别更直观：
 
-传统的LLM应用都是一问一答的形式，模型只能根据自己的训练数据来回答，流程非常简单：
+| 对比维度 | 本篇的模型直调 | 本篇的 Agent |
+| --- | --- | --- |
+| 产出方式 | 根据上下文直接生成回答 | 可直接回答，也可先请求工具再回答 |
+| 实时信息来源 | 调用方可以把事实放进 `messages` | 可由模型请求工具获取，本例使用本机时钟 |
+| 执行操作 | 脚本只发送问题 | 程序执行模型请求的已注册工具 |
+| 对话历史 | 脚本只发送一条用户消息 | `messages` 保存同一次运行中的请求与结果 |
+| 决策主体 | 无“是否行动”的判断，流程由程序写死 | 模型判断要不要调用工具、调用哪个 |
+| 本例中的风险 | 碰巧答对，但日期来源无法验证 | 工具未注册、参数解析失败、循环上限等运行问题 |
+| 本文中的对应 | 直接问模型：`01-llm-call.py` | 手写 `run_agent`；LangChain `create_agent` |
 
-![image-20261114070016348](./images/image-20261114070016348.png)
+别把它理解成两种对立方案：Agent 里干决策的还是那个 LLM，只是外面加了工具与循环。
 
+到这里第二遍的取舍也就清楚了：如果程序只做一件事——收到问题就先读时钟，再把日期交给模型组织措辞——按固定流程写就够了，根本不必引入 Agent。Agent 的价值出现在同一个入口要回答多种问题的时候：“这次要不要查时间”不再由程序员预先写死，而成了模型根据用户问题做的判断。上一节那段手写代码，干的就是这件事。
 
+## 1.6 LangChain：把重复劳动交给框架
 
-有了ToolCalling技术，则可以让LLM调用工具与外界交互，获取实时信息，工作流程则要复杂很多，是这样的：
+### 1.6.1 框架定位
 
-![image-20261114070033881](./images/image-20261114070033881.png)
+LangChain 是一个用来构建 LLM 应用的框架，把接入模型、声明工具、组装 Agent 循环、管理消息这些重复工作收进统一接口。
 
-流程如下：
+为什么要它？回头看手写版：真正的业务逻辑只有“读系统时间”一行，其余都在处理工具注册、消息格式和循环控制。这些活儿每个 Agent 都要干一遍，却跟具体业务无关。
 
-1. 用户提问（Input）：杭州今天天气如何？
+框架的做法是加一层抽象：模型接口统一，不同厂商一种调法；工具声明化，从函数签名和文档字符串生成说明；循环内置，调度交给框架；消息标准化，各类消息有统一类型。开发者只要说清楚用哪个模型、有哪些工具、问什么，执行结构框架接好。
 
-2. 模型分析（Reasoning）：用户询问杭州天气，我不知道，需要调用查询天气的工具`get_weather`
+边界也明显：常见 Agent 形态能省掉大量样板代码，但模型还是那个模型，能力边界没变。抽象有代价——调试时得透过框架去看消息列表，弄清里面发生了什么。
 
-3. 调用工具（Action）：调用工具，get\_weather，传入城市"杭州"
+### 1.6.2 四个核心组件
 
-4. 分析结果（Observation）：工具返回结果，模型分析结果，判断是否足以回答用户问题
+框架的抽象落到四个组件上，正好替换手写版里那四块重复代码：
 
-   1. 是：整理生成响应结果
+| 组件 | 封装的抽象 | 替代手写版的哪块工作 |
+| --- | --- | --- |
+| `init_chat_model` | 统一的模型接入 | 配置 `OpenAI(base_url=...)` 并读取响应 |
+| `@tool` | 从函数签名生成工具说明 | 手写 `tools_by_name` 与 `tools` 描述字典 |
+| `create_agent` | 内置的循环与工具调度 | `run_agent` 里的查找、解析、循环与回填 |
+| `messages` | 标准化的消息类型 | 手写版里显式维护的 `messages` 列表 |
 
-   2. 否：重复前面步骤
-
-5. 生成结果（Output）：根据工具的结果生成响应给用户
-
-
-
-上图所说的这个工作模型，我们称为**ReAct**模型，即**R**easoning **Act**ion，而这也是最基础一种Agent工作模型。
-
-
-
-恭喜你！已经完成了一个简单的Agent了
-
-
-
-不过，可以发现自己手写Agent还是挺复杂的，如果程序工具多起来，代码会成倍增长！所以，为了提升Agent开发的效率，我们就必须学习工业级框架了。
-
-
-
-## 2. 认识**LangChain**
-
-LangChain 由 Harrison Chase 创建于2022年10月，是用于开发**智能体工程（Agent Engineering）**&#x7684;平&#x53F0;**。**
-
-官网地址：
-
-官网文档：
-
-
-
-### 2.1 架构体系
-
-**LangChain**并不仅仅是一个框架，而是一整个智能体开发平台，包含很多不同的组件。
-
-
-
-其中，包含一系列开源的**智能体（Agent）**&#x5F00;发框架，而且兼容Python和TypeScript两种语言：
-
-![](./images/image-3.png)
-
-* LangChain：用于快速构建智能体，可兼容任何模型提供商。
-
-* LangGraph：从底层一步步控制智能体的构建，包括记忆（Memory）、人机协同（HITL）等
-
-* Deep Agents：用于构建复杂的、处理多步骤的任务的智能体
-
-
-
-另外，LangChain还包含一套帮助人工智能团队利用实时生产数据进行**持续测试和改进**的平台，叫做LangSmith：
-
-![](./images/image-4.png)
-
-
-
-> 总结：
->
-> LangChain是智能体开发平台，包含一套各种帮助开发、测试、评估智能体的框架。核心包括：
->
-> * LangChain：用于快速构建智能体，可兼容任何模型提供商。
->
-> * LangGraph：从底层一步步控制智能体的构建，包括记忆（Memory）、人机协同（HITL）等
->
-> * Deep Agents：用于构建复杂的、处理多步骤的任务的智能体
->
-> * LangSmith：用于测试、观察、评估、部署智能体
-
-### 2.2 快速入门
-
-下面，我们通过一个快速入门，了解Agent的定义和工作流程。
-
-#### 2.2.1 安装依赖
-
-**首先**，要使用LangChain必须先安装LangChain依赖、以及LangChain对模型的支持依赖。
+用这四个组件重写时钟示例，框架会接管工具注册、消息转换和循环。从零搭建项目时，把代码保存到章节目录，文件名为 `03-agent-call.py`。配套仓库已提供 [03-agent-call.py](./03-agent-call.py)。在项目根目录运行：
 
 ```bash
-uv add langchain langchain-deepseek
+uv run "LangChain入门笔记/01-Agent原理和LangChain快速入门/03-agent-call.py"
 ```
 
-
-
-**然后**，我们要确保在项目&#x7684;**`.env`**&#x73AF;境中配置好**api\_key**:
-
 ```python
-DEEPSEEK_API_KEY=your_api_key_here
-```
+import datetime
 
-接下来，就可以正式开发了。
-
-
-
-#### 2.2.2 代码示例
-
-接下来就可以开发Agent了，基本步骤如下：
-
-1. 加载系统环境变量
-
-2. 定义工具
-
-3. 定义Agent，绑定模型和工具
-
-4. 调用Agent
-
-
-
-Langchain提供了**create\_agent**方法用来快速创建Agent，我们只需要提供好Agent所需的**模型（Models）**、**工具（Tools）**&#x5373;可。
-
-
-
-我们在`notebooks/day05`新建一个`02.LangChain入门.ipynb`文件：
-
-![](./images/image-5.png)
-
-示例代码如下：
-
-```python
-from langchain.agents import create_agent
-from langchain.tools import tool
 from dotenv import load_dotenv
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain.messages import HumanMessage
+from langchain.tools import tool
 
-# 1.加载环境变量
-load_dotenv() # 读取.env文件，加入系统环境变量中
+load_dotenv()
 
-# 2.定义工具，就是定义函数，给函数加装饰器 @tool
-@tool
-def get_weather(location: str):
-    """查询指定location的天气"""
-    return f"Current weather in {location} is sunny"
-
-@tool
-def square_root(x: float) -> float:
-    """求x的平方根"""
-    return x ** 0.5
-
-# 3.定义Agent，绑定模型和工具，用函数create_agent
-agent = create_agent(
-    model="deepseek-v4-flash",
-    tools=[get_weather, square_root]
+model = init_chat_model(
+    model="deepseek-flash",
+    extra_body={"thinking": {"type": "disabled"}},
 )
 
-# 4.调用Agent，用invoke函数，传入一个Dict，字典要有messages属性，里面是消息的列表
-response = agent.invoke({
-    "messages": [{"role": "user", "content": "杭州天气如何？"}]
-})
-print(response) #
+
+@tool
+def current_time() -> str:
+    """获取当前时间"""
+    return str(datetime.datetime.now())
+
+
+agent = create_agent(model=model, tools=[current_time])
+response = agent.invoke({"messages": [HumanMessage("今天是几月几号")]})
+
+for message in response["messages"]:
+    message.pretty_print()
 ```
 
+如果模型调用一次时钟工具再作答，输出里会看到四条消息。`HumanMessage` 是提问，第一条 `AIMessage` 是工具请求，`ToolMessage` 记录本地时间，最后一条 `AIMessage` 给出回答。如果模型直接回答，输出里就只有提问和回答。
 
+| 手写 Agent 要处理的工作 | LangChain 如何处理 |
+| --- | --- |
+| 配置 DeepSeek 请求并读取模型响应 | `init_chat_model()` 接入 DeepSeek，模型集成读取 `DEEPSEEK_API_KEY` 并把响应转换成标准消息 |
+| 为工具编写名称、说明和参数结构 | `@tool` 从函数名、文档字符串和参数签名生成工具描述 |
+| 根据名称查找函数、解析参数并执行 | `create_agent()` 根据传入的工具列表处理模型发出的工具请求 |
+| 用调用 ID 关联结果，更新消息并再次请求模型 | Agent 把结果加到消息状态里，继续调用模型，直到模型这一轮没有新的工具请求 |
 
-> **说明**：
->
-> * LangChain的Agent无需你指定api\_key和base\_url，而是会尝试自己去环境变量读取。
->
-> * Pydantic Settings读取.env只会存入Settings对象，不会反向放入系统环境变量。在当前场景下需要读取系统环境变量就读取不到。
->
-> * 为了保证代码通用性，我们用了另一个库：dotenv，它负责读取.env文件，把其中的变量作为环境变量的一部分，从而简化了LangChain调用。
+调用时只要给模型、工具函数和用户消息，完整流程就跑起来了。想调试，直接看 `response["messages"]`：模型有没有请求工具、工具返回了什么，都在里面。 [LangChain Agents 文档](https://docs.langchain.com/oss/python/langchain/agents) · [DeepSeek 模型集成](https://docs.langchain.com/oss/python/integrations/chat/deepseek)
 
+### 1.6.3 生态工具的分工
 
+LangChain 的 `create_agent()` 和 Deep Agents 都运行在 LangGraph 上。LangSmith 可以跨框架追踪和评估运行结果。
 
-运行结果如下：
+![LangChain 用 create_agent 组装循环，Deep Agents 提供规划、子 Agent 和文件工具，两者的 Agent 都运行在 LangGraph 上。LangSmith 跨框架记录模型和工具调用，支持调试、监控和评估。](./images/langchain-ecosystem-handdrawn.png)
 
-```python
-🚀 正在调用大模型...
-{'messages': [HumanMessage(content='杭州今天天气如何?', additional_kwargs={}, response_metadata={}, id='c692ed96-916b-4e99-ac39-80106d21b27f'), AIMessage(content='', additional_kwargs={'refusal': None, 'reasoning_content': '用户想知道杭州今天的天气情况。我可以使用getWeather工具来获取杭州的天气信息。'}, response_metadata={'token_usage': {'completion_tokens': 63, 'prompt_tokens': 288, 'total_tokens': 351, 'completion_tokens_details': {'accepted_prediction_tokens': None, 'audio_tokens': None, 'reasoning_tokens': 19, 'rejected_prediction_tokens': None}, 'prompt_tokens_details': {'audio_tokens': None, 'cached_tokens': 0}, 'prompt_cache_hit_tokens': 0, 'prompt_cache_miss_tokens': 288}, 'model_provider': 'deepseek', 'model_name': 'deepseek-v4-flash', 'system_fingerprint': 'fp_8b330d02d0_prod0820_fp8_kvcache_20260402', 'id': '06041747-75ed-4c61-abee-a598feb08c5a', 'finish_reason': 'tool_calls', 'logprobs': None}, id='lc_run--019f22c6-3b84-7d22-afcd-5aee47623cd3-0', tool_calls=[{'name': 'getWeather', 'args': {'location': '杭州'}, 'id': 'call_00_cValv6t9HrvHNJ3WNCSD5096', 'type': 'tool_call'}], invalid_tool_calls=[], usage_metadata={'input_tokens': 288, 'output_tokens': 63, 'total_tokens': 351, 'input_token_details': {'cache_read': 0}, 'output_token_details': {'reasoning': 19}}), ToolMessage(content='Current weather in 杭州 is sunny', name='getWeather', id='32018b5d-00c8-46eb-bf6f-0e1e306b18e1', tool_call_id='call_00_cValv6t9HrvHNJ3WNCSD5096'), AIMessage(content='杭州今天天气晴朗 ☀️，阳光不错，适合外出活动哦！', additional_kwargs={'refusal': None, 'reasoning_content': '工具返回了杭州今天的天气是晴朗的。我可以直接告诉用户。'}, response_metadata={'token_usage': {'completion_tokens': 32, 'prompt_tokens': 370, 'total_tokens': 402, 'completion_tokens_details': {'accepted_prediction_tokens': None, 'audio_tokens': None, 'reasoning_tokens': 15, 'rejected_prediction_tokens': None}, 'prompt_tokens_details': {'audio_tokens': None, 'cached_tokens': 256}, 'prompt_cache_hit_tokens': 256, 'prompt_cache_miss_tokens': 114}, 'model_provider': 'deepseek', 'model_name': 'deepseek-v4-flash', 'system_fingerprint': 'fp_8b330d02d0_prod0820_fp8_kvcache_20260402', 'id': '4a6a34b6-2dae-45bf-bf54-5479f3fdf04d', 'finish_reason': 'stop', 'logprobs': None}, id='lc_run--019f22c6-41d2-7432-8ded-6121a3da3265-0', tool_calls=[], invalid_tool_calls=[], usage_metadata={'input_tokens': 370, 'output_tokens': 32, 'total_tokens': 402, 'input_token_details': {'cache_read': 256}, 'output_token_details': {'reasoning': 15}})]}
-```
+图 3 展示了 LangChain、Deep Agents、LangGraph 和 LangSmith 的分工。
 
+| 组件 | 解决的问题 |
+| --- | --- |
+| LangChain | 接入模型和工具，用 `create_agent()` 搭建和定制常见的 Agent 循环 |
+| LangGraph | 用状态、节点和边显式编排流程，支持持久化执行、流式输出和人工介入 |
+| Deep Agents | 为较长、分步骤的任务提供规划、子 Agent 和文件系统工具等预置能力 |
+| LangSmith | 追踪每次运行中的模型与工具调用，帮助调试、监控和评估 |
 
+四者不是层层替代，而是互补：日常循环用 LangChain，要显式控制流程换 LangGraph，长任务看 Deep Agents，调试和监控交给 LangSmith。产品分工可参阅 [LangGraph 官方概览](https://docs.langchain.com/oss/python/langgraph/overview)。
 
-### 2.3 总结
+三段验证代码都放在 1.2 搭好的项目里，用 `uv run` 就能直接跑。
 
-可以看到，使用LangChain定义Agent代码会非常简单，步骤如下：
+## 1.7 小结
 
-1. 使用`@tool`装饰器定义工具，通过文档注释描述工具作用
+走到这里，可以把几条线索收一收：
 
-2. 基于`create_agent`定义Agent，指定`model`和`tools`
+1. LLM 的训练知识有时效，外部资源访问需要宿主提供能力，多轮对话由应用或服务接续历史。日期实验展示了如何为模型提供可追溯的实时信息。
+2. Agent 没换模型，只是在外面加了一层结构：判断交给模型，外部能力交给工具，循环和状态把两者接起来。
+3. 多步运行靠的是“推理—行动—观察”的交替，消息列表就是这条链路的状态载体。
+4. 不是所有任务都需要 Agent。流程固定就写程序，用了 Agent 还要多担工具、参数、循环三类失败。
+5. LangChain 把模型接入、工具声明、循环组装、消息管理收成四个组件，省样板代码，不换模型能力；再往复杂走，LangGraph 管显式编排，Deep Agents 管长任务，LangSmith 管追踪评估。
 
-3. 调用Agent
-
-
-
-很多之前需要自己写的代码都省略了：
-
-* 定义工具时使用`@tool`装饰器，LangChain自动解析tool信息
-
-* 调用LLM时，无需自己组织tools参数，LangChain自动封装
-
-* LLM返回Tool结果时，无需自己解析Tool、调用Tool，LangChain自动处理
-
-* 拿到Tool结果无需自己拼接消息，调用LLM，LangChain自动完成
-
-
-
-可以说开发效率大大提高，这就是为什么要使用框架的原因！
-
-
-
-当然，以上只是LangChain最基本的用法，接下来我们就详细学习LangChain中的各个组件。
-
+循环框架接好了，模型本身仍然是可以单独配置和调用的组件。下一篇从模型初始化接口讲起：[如何初始化和配置 LangChain 模型](../02-LangChain模型初始化/LangChain模型初始化.md)。
