@@ -3,7 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/.idea/backend.iml" filepath="$PROJECT_DIR$/.idea/backend.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/food-recipe-agent@2.iml" filepath="$PROJECT_DIR$/.idea/food-recipe-agent@2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/food-recipe-agent.iml" filepath="$PROJECT_DIR$/.idea/food-recipe-agent.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/langgraphagent.iml" filepath="$PROJECT_DIR$/.idea/langgraphagent.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/langgraphagent@1.iml" filepath="$PROJECT_DIR$/.idea/langgraphagent@1.iml" />
     </modules>
