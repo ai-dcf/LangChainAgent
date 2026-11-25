@@ -1,231 +1,125 @@
-# LangChain 模型初始化
+# LangChain 入门笔记 02：模型初始化与消息类型
 
-在入门案例中我们通过`create_agent`创建Agent，直接指定模型名就可以了，非常方便。
+第 1 篇用 DeepSeek 跑通了 Agent。这一篇从聊天模型本身开始。先拿到一个可以调用的模型对象，再学习怎么用消息向它提问。
 
-但模型的参数却都是默认参数，无法修改。
+## 1. LangChain 初始化模型的几种方式
 
-如果要自定义模型参数，就需要单独初始化模型了。
+### 1.1 初始化需要哪些信息
 
+初始化聊天模型时，需要知道要用哪个模型、请求发往哪里，以及如何认证。LangChain 把这些信息放在几个参数里。
 
+| 参数 | 用途 |
+| --- | --- |
+| `model` | 指定服务端提供的模型名 |
+| `model_provider` | 让 `init_chat_model` 选择对应的服务商集成 |
+| `base_url` | 指定 API 地址。服务商的集成通常有默认地址 |
+| `api_key` | 提供调用凭证。服务商的集成通常也支持从约定的环境变量读取 |
 
-langchain提供了两种常见方法用来初始化模型：
+哪些参数需要显式传入，取决于所选集成和端点。本文依次演示三种写法。
 
-* 使用`init_chat_model`函数，由langchain自动创建模型对象
+| 写法 | 适用场景 |
+| --- | --- |
+| `init_chat_model(model=...)` | 可以从模型名推断服务商，并使用该集成的默认配置 |
+| `init_chat_model(model=..., model_provider=..., base_url=..., api_key=...)` | 需要显式选择集成，并配置自定义端点和密钥 |
+| `ChatOllama(model=...)` | 已经知道要用哪个集成，可以直接创建它提供的模型类 |
 
-* 使用不同模型对应的Model类，手动创建模型对象
+![DeepSeek、百炼千问和 Ollama 的初始化写法、模型类与服务](./images/langchain-model-initialization-v2.png)
 
+DeepSeek 可以用第一种写法，是因为 LangChain 识别 `deepseek` 前缀。项目装好 `langchain-deepseek` 后，`init_chat_model` 会创建 `ChatDeepSeek`。这个集成默认使用 DeepSeek 官方地址，并从 `DEEPSEEK_API_KEY` 读取密钥。
 
+[服务商推断规则](https://reference.langchain.com/python/langchain/chat_models/base/init_chat_model) · [聊天模型集成列表](https://docs.langchain.com/oss/python/integrations/chat)
 
-但最常用的还是`init_chat_model`.
+### 1.2 从默认配置到自定义端点
 
+已经跟着第 1 篇建好项目的，可以继续用原来的目录。第一次尝试的话，在一个空目录里初始化项目，再安装公共依赖。
 
+```bash
+uv init
+uv add langchain python-dotenv
+```
 
-## 3.1 初始化模型
+按下面各节安装对应的模型集成。如果使用云端模型，把密钥写入项目根目录的 `.env`。每段 Python 示例都可以单独保存为 `main.py`，再从项目根目录运行 `uv run main.py`。
 
-在LangChain中开始使用独立模型的最简单方法是使用`init_chat_model`函数。`init_chat_model`的常见参数如下：
+#### 1.2.1 只传模型名初始化 DeepSeek
 
-> * `model`：模型名称，**必填**
->
-> * `model_provider`：模型提供者，包括OpenAI、DeepSeek、Anthropic、Google等，默认会根据模型名推断：
->
->   * 模型名以deepseek为前缀：推断为DeepSeek
->
->   * 模型名以gpt为前缀：推断为OpenAI
->
->   * ...
->
-> * `api_key`：模型的认证key，默认会从环境变量读取与模型提供者有关的key，例如
->
->   * OpenAI：默认读取OPENAI\_API\_KEY
->
->   * DeepSeek：默认读取DEEPSEEK\_API\_KEY
->
->   * ...
->
-> * `base_url`：模型提供者的url地址，默认会根据模型提供者去推断，例如
->
->   * DeepSeek：默认为https://api.deepseek.com
->
->   * OpenAI：默认为https://api.openai.com
->
->   * ...
->
-> * 其它模型参数，参考模型官方文档，例如`temperature`、`max_tokens`、`extra_body`等
+如果还没安装 DeepSeek 集成，先执行 `uv add langchain-deepseek`。密钥可以沿用第 1 篇的配置，也可以按下面的格式写入 `.env`。
 
+```dotenv
+DEEPSEEK_API_KEY=你的实际密钥
+```
 
+```python
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
 
-虽然有这么多参数，但并不是都需要填写。分为两种情况：
+load_dotenv()
+deepseek_model = init_chat_model(model="deepseek-flash")
+print(type(deepseek_model).__name__)
+```
 
-* **默认初始化**：用于LangChain默认支持的模型，只用传入model参数
+终端会输出 `ChatDeepSeek`，可以看出只传模型名也能选中 DeepSeek 集成。 [DeepSeek API 模型参数](https://api-docs.deepseek.com/api/create-chat-completion/#request)
 
-* **自定义初始化**：用于LangChain默认不支持的模型，需要传入全部参数
+#### 1.2.2 显式配置百炼千问
 
+LangChain 无法从 `qwen3.8-flash` 推断服务商。
 
+百炼提供 OpenAI 兼容接口，可以用 `model_provider="openai"` 选用 `ChatOpenAI`，再传入百炼的地址和密钥。如果还没安装 OpenAI 集成，先执行 `uv add langchain-openai`。
 
-LangChain支持的模型列表可以参考官方文档：https://docs.langchain.com/oss/python/integrations/chat
+把百炼的密钥和 OpenAI 兼容接口地址加入 `.env`。如果控制台给你的访问地址不同，就用控制台显示的地址。
 
-![image-20261114152004487](./images/image-20261114152004487.png)
+```dotenv
+DASHSCOPE_API_KEY=你的实际密钥
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
 
+```python
+import os
 
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
 
-### 3.1.1 默认认初始化
+load_dotenv()
+bailian_model = init_chat_model(
+    model="qwen3.8-flash",
+    model_provider="openai",
+    base_url=os.environ["DASHSCOPE_BASE_URL"],
+    api_key=os.environ["DASHSCOPE_API_KEY"],
+)
+print(type(bailian_model).__name__)
+```
 
-对于LangChain默认支持的模型，调用`init_chat_model`时最少需要一个参数`model`，
+终端会输出 `ChatOpenAI`。这里的类名表示使用 OpenAI 兼容接口，请求由 `base_url` 指向百炼。百炼千问也可以通过 `langchain-community` 的 `ChatTongyi` 接入。 [阿里云接入指南](https://help.aliyun.com/en/model-studio/use-bailian-in-langchain)
 
-LangChain会根据名称推断`model_provider`、`base_url`，并去环境变量加载对应的`api_key`。
+#### 1.2.3 直接实例化 Ollama 模型
 
+集成提供专用的聊天模型类时，可以直接创建模型对象。Ollama 的专用类是 `ChatOllama`。LangChain 也支持用 `init_chat_model(..., model_provider="ollama")` 初始化 Ollama 模型。Ollama 本身还提供部分 OpenAI API 的兼容接口。 [LangChain 初始化参考](https://reference.langchain.com/python/langchain/chat_models/base/init_chat_model) · [Ollama 兼容接口文档](https://docs.ollama.com/api/openai-compatibility)
 
+先安装 LangChain 的 Ollama 集成。
 
-例如，我们要使用Deepseek这个模型，LangChain默认就支持，所以就只需要`model`参数，但`API_KEY`还是要配置的：
-
-* **首先**，我们需要安装模型依赖（如果已经安装可以跳过）：
-
-  ```bash
-  uv add langchain-deepseek
-  ```
-
-* **然后**，我们要确保在项目&#x7684;**.env**环境中配置好**api\_key**:
-
-  ```shell
-  DEEPSEEK_API_KEY=your_api_key_here
-  ```
-
-* **最后**，就可以直接使用init\_chat\_model初始化模型了：
-
-  ```python
-  # ===================1.初始化模型=====================
-  # 导入Langchain的初始化模型的函数
-  from langchain.chat_models import init_chat_model
-  # 1. 加载环境变量
-  from dotenv import load_dotenv
-  load_dotenv()
-  
-  # 2.调用init_chat_model初始化模型，LangChain自动推断base_url和api_key，我们配置其它参数即可
-  model = init_chat_model(
-      model="deepseek-v4-flash",
-      temperature=0.7,
-      extra_body={"thinking": {"type": "disabled"}}
-  )
-  
-  # =================2.测试====================
-  from langchain.agents import create_agent
-  
-  # 3.初始化Agent，传入初始化好的model、tools，tools可以为空
-  agent = create_agent(model = model, tools=[])
-  
-  # 4.调用Agent
-  response = agent.invoke({
-      "messages": [{"role": "user", "content": "你是谁？"}]
-  })
-  print(response)
-  ```
-
-
-
-可见，采用`init_chat_model`自动初始化模型时，模型的类型由LangChain通过模型名称自动推断。
-
-如果要切换其它模型，我们只需要安装其它模型依赖，然后配置API\_KEY，改变模型名称即可，其它代码不用动。
-
-
-
-### 3.1.2 自定义初始化
-
-如果不是LangChain识别的模型，除了`model`以外，还需要自己配置`model_provider`、`base_url`、`api_key`了。
-
-
-
-例如，通过阿里云百炼的 OpenAI 兼容接口访问千问，需要显式选择 OpenAI 集成并配置百炼的端点与密钥。
-
-* 我们需要在环境变量中定义**api\_key**和**base\_url**
-
-* 然后在`init_chat_model`中指定**model**、**model\_provider**、**base\_url**和**api\_key**
-
-
-
-具体步骤如下：
-
-* **首先，**&#x5728;.env中配置好`api_key`和`base_url`：
-
-  ![img](./images/image-6.png)
-
-  示例：
-
-  ```bash
-  DASHSCOPE_API_KEY=your_api_key_here
-  DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-  ```
-
-* **然后，**&#x624B;动读取环境变量中的`api_key`和`base_url`，再调用`init_chat_model`，手动传入`api_key`和`base_url`参数，初始化模型
-
-  ```python
-  # 导入Langchain的初始化模型的函数
-  from langchain.chat_models import init_chat_model
-  # ===================Step 1.初始化模型=====================
-  # 1.加载环境变量
-  from dotenv import load_dotenv
-  load_dotenv()
-  
-  import os
-  base_url = os.getenv("DASHSCOPE_BASE_URL")
-  api_key = os.getenv("DASHSCOPE_API_KEY")
-  
-  # 2.初始化模型
-  model = init_chat_model(
-      model="qwen3.7-plus", # 模型名称，这里可以自定义，我们用的是阿里的qwen-max
-      model_provider="openai", # 如果是Langchain不支持的模型，用openai的规范
-      base_url=base_url,
-      api_key=api_key
-  )
-  
-  # =================Step 2.测试====================
-  from langchain.agents import create_agent
-  
-  # 3.初始化Agent，传入初始化好的model、tools，tools可以为空
-  agent = create_agent(model = model, tools=[])
-  
-  # 4.调用Agent
-  response = agent.invoke({
-      "messages": [{"role": "user", "content": "你是谁？"}]
-  })
-  print(response)
-  ```
-
-`model_provider="openai"` 选择 LangChain 的 OpenAI 集成。请求发往 `DASHSCOPE_BASE_URL` 指定的百炼端点，并使用 `DASHSCOPE_API_KEY` 认证。
-
-[切换模型示例](./03-switch-model.py) 使用同一套百炼配置，让两个模型回答同一个问题。
-
-
-
-
-
-### 3.1.3 Model初始化
-
-也可以直接实例化提供商的聊天模型类。访问本地 Ollama 时，可以使用 `ChatOllama`。
-
-例如：Ollama
-
-首先，需要安装Ollama依赖：
-
-```plain&#x20;text
+```bash
 uv add langchain-ollama
 ```
 
-启动 Ollama 后，先执行 `ollama pull qwen3.5:0.8b` 下载示例模型。
+安装并启动 Ollama，然后下载示例使用的模型。
+
+```bash
+ollama pull qwen3.5:0.8b
+```
+
+用 `ChatOllama` 初始化刚下载的模型，再沿用第 1 篇的 `create_agent` 发一次提问。连接默认的本地 Ollama 服务通常无需 API Key。
 
 ```python
+from langchain.agents import create_agent
 from langchain_ollama import ChatOllama
 
-# 初始化Ollama平台的模型
+# 初始化 Ollama 上的本地模型
 model = ChatOllama(
     model="qwen3.5:0.8b",
     temperature=1.0,
 )
 
-# =================测试====================
-from langchain.agents import create_agent
-
-# 初始化Agent，传入初始化好的model
-agent = create_agent(model = model, tools=[])
+# 创建 Agent 并发送一条用户消息
+agent = create_agent(model=model, tools=[])
 
 response = agent.invoke({
     "messages": [{"role": "user", "content": "你是谁？"}]
@@ -233,189 +127,105 @@ response = agent.invoke({
 print(response)
 ```
 
+运行后，返回结果的 `messages` 里会包含这次提问和模型回复。想换成其他已经下载的聊天模型，把 `model` 改成对应的标签即可。
 
+#### 1.2.4 在同一端点切换模型
 
-## 3.2 直接调用模型
-
-对于简单的业务，没有必要创建Agent，直接调用模型也能达成目的。
-
-LangChain提供了两个不同的方法来调用模型：
-
-* invoke：阻塞式访问
-
-* stream：流式访问
-
-
-
-下面演示 invoke 的两种输入。运行 [普通调用示例](./05-model-invoke.py) 可以一次拿到完整回复，运行 [流式调用示例](./06-model-stream.py) 可以看到回复逐段输出。
+沿用第 1.2.2 节的百炼配置。把初始化封装成函数后，传入不同模型名即可创建对应的模型对象。
 
 ```python
-from langchain.chat_models import init_chat_model
-# 1.加载环境变量
+import os
+
 from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
+
 load_dotenv()
 
-# 2.调用init_chat_model函数初始化模型
-model = init_chat_model(
+
+def create_bailian_model(model_name: str):
+    return init_chat_model(
+        model=model_name,
+        model_provider="openai",
+        base_url=os.environ["DASHSCOPE_BASE_URL"],
+        api_key=os.environ["DASHSCOPE_API_KEY"],
+    )
+
+
+for model_name in ("qwen3.8-flash", "qwen4-max"):
+    model = create_bailian_model(model_name)
+    print(model.model_name)
+```
+
+## 2. LangChain 的几种消息类型
+
+### 2.1 模型接收什么，返回什么
+
+聊天模型用 `model.invoke(...)` 接收输入，并返回一条 `AIMessage`。最简单的输入是一段字符串，LangChain 会把它包装成一条 `HumanMessage`。如果还要给模型提供角色设定、对话历史或工具结果，就可以传入消息列表。
+
+消息正文放在 `content` 字段里。消息类型表明这段内容在对话中扮演什么角色。
+
+| 类型 | 常见角色 | 用途 |
+| --- | --- | --- |
+| `HumanMessage` | `user` | 用户的提问或指令 |
+| `AIMessage` | `assistant` | 模型的回答或工具调用请求 |
+| `SystemMessage` | `system` | 给模型提供角色、语气或任务要求 |
+| `ToolMessage` | `tool` | 把工具执行的结果传回模型 |
+
+![字符串与消息列表的输入输出，以及工具结果回传流程](./images/langchain-message-flow-v2.png)
+
+普通问答通常只涉及 `HumanMessage` 和 `AIMessage`。加入 `SystemMessage` 后，可以让同一个问题带上明确的身份或回答要求。多轮对话则按发生顺序把之前的消息一起传入。
+
+工具调用多一层对应关系。模型发出的调用请求放在 `AIMessage.tool_calls`，工具执行完成后，`ToolMessage.tool_call_id` 要填入对应请求的 ID。第 1 篇的 Agent 就是通过这条消息把读取到的时间交回模型。
+
+需要显式指定其他角色时，可以使用 `ChatMessage`。查看模型回复时，`response_metadata` 和 `usage_metadata` 还可以提供响应元信息和 token 用量。 [LangChain 消息文档](https://docs.langchain.com/oss/python/langchain/messages)
+
+### 2.2 从单句提问到带角色的消息列表
+
+下面两个例子都用 DeepSeek，运行前按第 1.2.1 节安装 `langchain-deepseek` 并配置 `DEEPSEEK_API_KEY`。两个脚本都包含模型初始化，用的是同一个问题。
+
+#### 2.2.1 直接传入字符串
+
+先问一个问题，用 `response.text` 读取回答文本。
+
+```python
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
+
+load_dotenv()
+deepseek_model = init_chat_model(
     model="deepseek-flash",
-    extra_body={"thinking": {"type": "disabled"}}
+    extra_body={"thinking": {"type": "disabled"}},
 )
 
-# 3.调用invoke方法，直接传字符串
-response = model.invoke("你是谁？")
-print(response)
-
-print("="*50)
-
-# 4.调用invoke，传消息数组
-response = model.invoke([
-    {"role": "system", "content": "你扮演小团团，用她的身份回答问题"},
-    {"role": "user", "content": "你是谁？"}
-])
-# 查看响应结果
-print(response)
+response = deepseek_model.invoke("为什么月亮每天看起来形状不一样？")
+print(response.text)
 ```
 
+如果想查看完整的 `AIMessage`，也可以直接打印 `response`。这里通过 `extra_body` 关闭思考模式。 [DeepSeek 思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/)
 
+#### 2.2.2 传入带角色的消息列表
 
-## 3.3 消息（Messages）
-
-在调用模型时，发送给LLM的消息、LLM返回的消息都包含以下几部分内容：
-
-* role：消息所属角色，可以是system、user、assistant、tool
-
-* content：消息的内容
-
-* metadata（可选）：消息的元数据，例如：消息的ID、消耗的token等
-
-
-
-之前我们都是自己用dict模拟消息：
+保留同一个问题，在前面加一条 `SystemMessage`，让模型以天文馆讲解员的身份回答。
 
 ```python
-response = model.invoke(
-    [{"role": "user", "content": "月亮的首都是哪里？"}]
-)
-```
-
-这太麻烦了。在LangChain中发送给LLM的消息、LLM返回的消息都统一被封装为BaseMessage，它是中基本的上下文单元。
-
-
-
-### 3.3.1 消息类型
-
-在LangChain中，我们并不需要自己创建BaseMessage对象，LangChain已经把常见消息根据角色（Role）创建了对应的BaseMessage的子类：
-
-* SystemMessage：role是system，代表系统消息，用于设定模型角色和交互背景
-
-* HumanMessage：role是user，代表用户输入的消息
-
-* AIMessage：role是assistant，代表LLM生成的响应，包含：文本、工具调用、元数据
-
-* ToolMessage：role是tool，代表工具调用时产生的结果
-
-
-
-### 3.3.2 定义Message消息
-
-我们可以自定义LangChain的各种Message，像这样传递消息列表：
-
-```python
-# 模型消息
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
 from langchain.messages import HumanMessage, SystemMessage
-from langchain.chat_models import init_chat_model
-# 1.加载环境变量
-from dotenv import load_dotenv
-load_dotenv()
 
-# 2.初始化模型
-model = init_chat_model(
+load_dotenv()
+deepseek_model = init_chat_model(
     model="deepseek-flash",
-    extra_body={"thinking": {"type": "disabled"}}
+    extra_body={"thinking": {"type": "disabled"}},
 )
 
-# 3.调用模型，发送消息
-response = model.invoke([
-        SystemMessage(content="你扮演小团团，用她的身份回答问题"),
-        HumanMessage(content="你是谁？")
-    ])
-
-print(response)
+messages = [
+    SystemMessage(content="你是一位天文馆讲解员，用小学生能听懂的语言回答。"),
+    HumanMessage(content="为什么月亮每天看起来形状不一样？"),
+]
+response = deepseek_model.invoke(messages)
+response.pretty_print()
 ```
 
+`response.pretty_print()` 会打印模型返回的消息。要继续多轮问答，可以把这条回复和下一条用户提问按顺序追加到 `messages`，再调用一次模型。
 
-
-## 3.4 结构化输出
-
-有时候我们需要让模型输出固定结构的数据，例如JSON，这样我们就能拿到JSON，转为对象。
-
-
-
-而在LangChain中，只需要非常简单的配置即可让模型的输出按照我们的规定，直接转为对象。步骤为：
-
-* 1.读取环境变量
-
-* 2.初始化普通模型
-
-* 3.定义Pydantic BaseModel类，约束输出结果
-
-* 4.用模型绑定BaseModel
-
-* 5.调用模型，完成结构化输出
-
-
-
-示例：
-
-```python
-from dotenv import load_dotenv
-from langchain.chat_models import init_chat_model
-from langchain.messages import HumanMessage
-# 1.准备和加载环境变量
-load_dotenv()
-
-# 2.初始化模型 init_chat_model
-model = init_chat_model(
-    model="deepseek-flash",
-    extra_body={
-        "thinking": {
-            "type": "disabled"
-        }
-    }
-)
-
-# 3.定义 BaseModel 类，用来约束模型的输出，同时封装模型要输出的数据
-from pydantic import BaseModel, Field
-
-class CapitalInfo(BaseModel):
-    name: str = Field(description="首都的名字")
-    location: str = Field(description="城市在月球上的位置")
-    vibe: str = Field(description="城市的风格和生活氛围")
-    economy: str = Field(description="城市的主要产业和经济来源")
-
-# 4.将BaseModel类与模型绑定，要求输出结构化结果
-model_with_structured_output = model.with_structured_output(CapitalInfo, method="function_calling")
-
-# 5.调用模型
-response = model_with_structured_output.invoke([
-    HumanMessage("你是科幻小说作家，帮我创造月球首都城市背景。"),
-])
-
-print(type(response)) # <class '__main__.CapitalInfo'>
-print(response)
-```
-
-这里直接调用绑定了 Pydantic 模型的聊天模型，返回值是经过校验的 `CapitalInfo` 实例。
-
-```text
-<class '__main__.CapitalInfo'>
-name='广寒城 (Guanghan City)' location='月球正面第谷环形山（Tycho Crater），位于南纬43度，西经11度，建于环形山内部穹顶之下' vibe='赛博朋克与东方古典美学的融合——全息投影的琉璃瓦屋顶、悬浮的霓虹灯笼、街道两旁延伸的透明穹顶外是永恒的星空。城市分为七层垂直结构，最底层是工业区与贫民窟，顶层是执政院与富商宅邸。空气中飘着合成茉莉花香，全息广告用古汉语、英语和月球通用语轮流播放。' economy='氦-3采矿（能源出口地球）、月球旅游业（零重力观光、地球升起观景台）、尖端量子计算芯片制造、月球地产与高空土地交易、地下农场粮食自给'
-```
-
-
-
-
-
-## 3.5 总结
-
-尽管里面Model已经能完成与模型交互，但模型更擅长完成一次性对话任务，如果要调用工具，实现复杂逻辑，还是要用Agent，而且LangChain还给Agent添加了很多高级功能，接下来我们就继续深入学习Agent
+下一篇讲 Agent 的调用细节。
