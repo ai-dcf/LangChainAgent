@@ -1,697 +1,591 @@
-# 5. 工具（Tools）
+# LangChain 入门笔记 04：Tool 的定义与调用
 
-一个完整的Agent至少要包含两个关键的部分：
+前几篇里那个时钟工具只有几行：一个函数，一行 docstring，交给 `create_agent`，模型就知道什么时候该调用它、该传什么参数。函数没有写名字，也没有写 JSON Schema，这些信息是 LangChain 从函数本身读出来的。
 
-* **模型**：是Agent的大脑，负责推理、分析，规划任务步骤
+读出来的方式不止一种。可以把工具名和用途直接写进装饰器，可以把说明写在 docstring 里，也可以用一个 Pydantic 模型把参数框起来。三种写法都能让模型用上工具，但写出来的说明并不一样，适合的场景也不一样。这一篇只谈工具这一件事：三种定义方式怎么选，现成的工具怎么用，以及怎么把真实的 API 包成工具。读完你会拿到五个能运行的小程序。
 
-* **工具**：是Agent的手脚，负责执行任务，与外界交互
+## 1. 三种定义方式：模型看到的工具说明从哪来
 
+### 1.1 工具三要素与前面的铺垫
 
+模型决定要不要调用工具时，看的是三样东西：工具叫什么、这个工具能干什么、参数怎么填。第 1 篇手写版本里，这三样是我们在字典里一项项写出来的；换成 `@tool` 之后，框架从函数定义里提取它们，再转成模型能理解的格式。第 2 篇已经讲过 `ToolMessage` 怎么把执行结果回填，第 3 篇用 `stream_mode="updates"` 看过工具执行的那一步，这里不再重复。
 
-所谓的**工具（Tool）**，本质就是一个可调用的**函数**，但是这个函数不是我们自己去调用，而是给模型调用。因此除了定义函数外，我们还需要清晰描述这个工具，让模型知道这个工具如何使用。包括下列信息：
+三种写法的区别，就在于这三样东西从哪里来。底层用到的都是 `@tool`，没有第三种全新 API。
 
-* 工具名
+### 1.2 方式一：装饰器属性覆盖名称和用途
 
-* 工具的作用描述
+最直接的做法是把名字和用途当作参数交给装饰器。下面的函数名是 `tool1`，但模型看到的名称是 `square_root`，用途也被 `description` 直接指定了。
 
-* 工具需要的参数
+从零搭建项目时，把下面的代码保存到章节目录，文件名为 `01-tool-decorator-args.py`。配套仓库已提供 [01-tool-decorator-args.py](./01-tool-decorator-args.py)。在项目根目录运行：
 
-
-
-在LangChain中，只要在工具函数上添加`@tool`装饰器，它就会自动提取函数信息，无需我们自己组装。不过`@tool`装饰器获取函数信息的方式有多种：
-
-* 基于`@tool`装饰器属性
-
-* 基于函数的文档注释
-
-* 基于BaseModel作为schema
-
-
-
-> **注意**：
->
-> 在LangChain中，作为工具的函数**有两个保留的参数名**，你的自定义参数不能与之重复！他们是：
->
-> * **config**：用来传递运行时配置
->
-> * **runtime**：用来传递运行时上下文
->
-> 
->
-> 具体可参考官方文档：[保留参数名（Reserved argument names）](https://docs.langchain.com/oss/python/langchain/tools#reserved-argument-names)，后续我们会讲到这两个参数的用法。
-
-
-
-## 5.1 基于装饰器属性描述工具
-
-在LangChain中，定义工具需要用到@tool装饰器，我们可以通过装饰器来定义工具名、工具的作用：
+```bash
+uv run "LangChain入门笔记/04-LangChain-Tool调用/01-tool-decorator-args.py"
+```
 
 ```python
-# 定义工具
 from langchain.tools import tool
 
-# =================方式一：基于装饰器描述工具==================
+
 @tool("square_root", description="Calculate the square root of a number")
 def tool1(x: float) -> float:
     return x ** 0.5
+
+
+print("工具名：", tool1.name)
+print("用途：", tool1.description)
+print("参数：", tool1.args)
+print("直接调用：", tool1.invoke({"x": 467}))
 ```
 
+输出里工具名是 `square_root`，不是 `tool1`。参数信息仍然来自函数签名：`x: float` 被读成 `{"x": {"title": "X", "type": "number"}}`。装饰器改的是名称和用途这两项，参数那一项还是框架自己读的。
 
+### 1.3 方式二：docstring 描述（推荐）
 
-智能体在工作时，需要将函数的名称、输入、作用传递给大模型，默认情况下这些信息的来源是：
+装饰器不传参数时，工具名取函数名，用途取 docstring。参数和用途写在同一处，改函数时顺手就能改说明，这是最省事、也最不容易写漏的写法。第 1 篇的时钟工具就是这么写的。
 
-* 工具名称：函数名
+下面的例子把用途写在 docstring 开头，把每个参数的含义写在 `Args:` 下面。前半句是给模型判断"什么时候用这个工具"的，后半句是给它填参数用的。
 
-* 工具输入：函数入参
+从零搭建项目时，把下面的代码保存到章节目录，文件名为 `02-tool-docstring.py`。配套仓库已提供 [02-tool-docstring.py](./02-tool-docstring.py)。在项目根目录运行：
 
-* 工具作用：函数的注释
-
-
-
-
-
-## 5.2 基于文档注释描述工具
-
-如果不@tool装饰器没有定义工具名和作用描述，此时：
-
-* 工具名：默认就是函数名
-
-* 工具所需的参数：默认就是函数的参数列表
-
-* 工具作用的描述：默认就是函数的文档注释（此时文档注释必须有，否则报错）
+```bash
+uv run "LangChain入门笔记/04-LangChain-Tool调用/02-tool-docstring.py"
+```
 
 ```python
-# =================方式二：基于文档注释描述工具==================
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain.messages import HumanMessage, ToolMessage
 from langchain.tools import tool
 
-# 定义一个查询天气的tool
+
 @tool
 def get_weather(location: str, units: str = "celsius", include_forecast: bool = False) -> str:
-    """
-    Get current weather and optional forecast.
+    """查询指定城市的当前天气，也可以附带未来几天的预报。
+
     Args:
-        location: city name or coordinates
-        units: unit of degrees
-        include_forecast: does it include the weather forecast
+        location: 城市名，例如"杭州"
+        units: 温度单位，celsius 或 fahrenheit
+        include_forecast: 是否需要未来五天的预报
     """
     temp = 22 if units == "celsius" else 72
-    result = f"Current weather in {location}: {temp} degrees {units[0].upper()}"
+    result = f"{location} 当前温度：{temp} {units}"
     if include_forecast:
-        result += "\nNext 5 days: Sunny"
+        result += "\n未来五天：晴"
     return result
+
+
+print("工具名：", get_weather.name)
+print("用途：", get_weather.description)
+print("参数：", get_weather.args)
+print("直接调用：", get_weather.invoke({"location": "杭州", "include_forecast": True}))
+
+model = init_chat_model(
+    model="deepseek-flash",
+    extra_body={"thinking": {"type": "disabled"}},
+)
+agent = create_agent(model=model, tools=[get_weather])
+
+for step in agent.stream(
+    {"messages": [HumanMessage("杭州现在冷不冷？顺便说说未来几天的天气。")]},
+    stream_mode="updates",
+):
+    for messages in step.values():
+        for message in messages:
+            if isinstance(message, ToolMessage):
+                print("工具返回：", message.content[:200])
 ```
 
+先看打印出来的 `description`，docstring 的 `Args:` 会原样跟在用途后面，模型读到的就是这一整段。再看 Agent 部分：问句里没有出现 `celsius` 这样的词，模型仍能按 `Args:` 里的说明决定要不要带 `include_forecast`。观察工具执行用的还是第 3 篇的 `stream_mode="updates"`，这里只是拿它验证参数填得对不对。
 
+### 1.4 方式三：args_schema=BaseModel 约束参数
 
-## 5.3 定义BaseModel描述工具参数
+参数一多，光靠 docstring 就容易漏掉取值范围。比如温度单位只允许 `celsius` 和 `fahrenheit`，写进 docstring 只是"建议"，模型仍可能传 `kelvin`。用 Pydantic 模型描述参数，可以把枚举、范围、默认值这些约束明确交给模型，并在调用时做校验。
 
-如果函数的参数比较多，而且比较复杂，此时建议通过pydantic model来描述参数列表。
+从零搭建项目时，把下面的代码保存到章节目录，文件名为 `03-tool-args-schema.py`。配套仓库已提供 [03-tool-args-schema.py](./03-tool-args-schema.py)。在项目根目录运行：
 
-
-
-例如，我们需要定义个查询天气的tool，借助于Pydantic来约束入参。
-
-我们定义一个入参的模型，在模型中添加入参描述信息：
+```bash
+uv run "LangChain入门笔记/04-LangChain-Tool调用/03-tool-args-schema.py"
+```
 
 ```python
-# ==================方式三：基于BaseModel描述工具参数=================
-from pydantic import BaseModel, Field
 from typing import Literal
+
 from langchain.tools import tool
-# 例如一个查询天气的tool
+from pydantic import BaseModel, Field
+
+
 class WeatherInput(BaseModel):
-    """查询天气的输入参数."""
-    location: str = Field(description="City name or coordinates")
+    """查询天气需要的参数。"""
+
+    location: str = Field(description="城市名或经纬度")
     units: Literal["celsius", "fahrenheit"] = Field(
         default="celsius",
-        description="Temperature unit preference"
+        description="温度单位，只能是 celsius 或 fahrenheit",
     )
-    include_forecast: bool = Field(
-        default=False,
-        description="Include 5-day forecast"
-    )
-    
-# 定义一个查询天气的tool
+    include_forecast: bool = Field(default=False, description="是否返回五天预报")
+
+
 @tool(args_schema=WeatherInput)
 def get_weather(location: str, units: str = "celsius", include_forecast: bool = False) -> str:
-    """Get current weather and optional forecast."""
+    """查询天气。"""
     temp = 22 if units == "celsius" else 72
-    result = f"Current weather in {location}: {temp} degrees {units[0].upper()}"
+    result = f"{location} 当前温度：{temp} {units}"
     if include_forecast:
-        result += "\nNext 5 days: Sunny"
+        result += "\n未来五天：晴"
     return result
+
+
+print("工具名：", get_weather.name)
+print("用途：", get_weather.description)
+print("参数：", get_weather.args)
+print("合法参数调用：", get_weather.invoke({"location": "杭州", "units": "celsius"}))
+
+try:
+    get_weather.invoke({"location": "杭州", "units": "kelvin"})
+except Exception as exc:
+    print("非法参数被拦下：", type(exc).__name__)
 ```
 
+`tool.args` 里会出现 `units` 的枚举和每个字段的 `description`，这些就是模型填参时看到的约束。最后那段故意传了 `kelvin`，Pydantic 会在函数执行前把它拦下。要注意 `description` 和 `args_schema` 管的是两件事：前者说明"这个工具什么时候用"，后者说明"每个参数怎么填"。用了 `args_schema` 之后，函数自身的 docstring 仍会作为工具用途，不会自动消失。
 
+### 1.5 三类信息的来源与优先级
 
-## 5.4 总结
+同一个要素有多种来源时，覆盖关系是这样的：
 
-虽然方式有三种，但大多数情况下都推荐使用第二种方式，即：tool装饰器 + 文档注释
+| 要素 | 优先来源 | 后备来源 |
+| --- | --- | --- |
+| 工具名 | `@tool("name")` 的位置参数 | 函数名 |
+| 用途描述 | `@tool(description=...)` | 函数 docstring |
+| 参数结构 | `args_schema=BaseModel` | 签名类型注解 + docstring 的 `Args:` |
 
+方式一和方式三都不是独立的工具类型，它们是在覆盖 `@tool` 默认读取的信息。三种写法可以叠着用，比如 `@tool("name", description=...)` 再加 `args_schema`，只是多数时候没必要写满。
 
+### 1.6 怎么选：场景对照表
 
+原文那句"大多数情况下推荐第二种"仍然成立，但要补一句：参数复杂时，docstring 也可以配合类型注解承载约束，不是非得建一个 BaseModel。
 
+| 场景 | 推荐写法 | 理由 |
+| --- | --- | --- |
+| 无参或一两个简单参数 | 方式二：docstring | 说明和实现写在一起，改动同步 |
+| 参数有枚举、范围、必填/可选 | 方式三：`args_schema` | 约束明确，调用前就能校验 |
+| 只想改工具名或临时覆盖用途 | 方式一：装饰器属性 | 一行改完，不用动函数体 |
+| 既要清晰用途又要严格参数 | 方式二 + 类型注解，或方式三 + docstring | 两者分工不同，可以并用 |
 
-## 5.1 基本用法
+后面的第 3 部分全部用方式二定义。那里要接的是真实 HTTP API，重点是把"什么时候该调用它"讲给模型听，参数约束用普通类型注解就够了。 [LangChain 工具定义文档](https://docs.langchain.com/oss/python/langchain/tools)
 
-我们先通过一个案例快速回顾Agent定义的步骤，以及Agent的工作原理。
+## 2. 运行准备
 
-定义一个带有工具的Agent分为两步：
+### 2.1 沿用前三篇的项目与配置
 
-* 定义工具
+已经跟着前面几篇建好项目的，继续用原来的目录。依赖、锁文件和 `.env` 都在那里，本篇只需要往同一个章节目录里加脚本。第一次尝试的话，回到第 1 篇从 `uv init` 开始，装好 `langchain`、`langchain-deepseek` 和 `python-dotenv`，并在 `.env` 里写入 `DEEPSEEK_API_KEY`。
 
-* 定义Agent，绑定工具
+如果你拿到的是配套仓库，在仓库根目录运行 `uv sync --locked` 安装锁定的依赖，再创建本地 `.env`。示例统一用 `deepseek-flash` 并关闭思考模式，命令都从项目根目录执行。
 
+### 2.2 新增依赖、.env 与两个配套 notebook
 
-
-首先，使用tool装饰器定义工具：
-
-```python
-# 1.使用tool装饰器定义工具
-from langchain.tools import tool
-
-@tool
-def get_weather(location: str) -> str:
-    """
-    Get the weather in a given location.
-    Args:
-        location: city name or coordinates
-    """
-    return f"Current weather in {location} is sunny"
-```
-
-接着，定义Agent，绑定工具：
-
-```python
-from langchain.agents import create_agent
-from langchain_core.messages import HumanMessage
-
-# 2.创建智能体，并绑定工具
-agent = create_agent(
-    model="deepseek-chat",
-    tools=[get_weather]
-)
-
-# 3.调用Agent
-response = agent.invoke(
-    {"messages": [HumanMessage(content="杭州今天天气如何?")]},
-)
-
-for message in response['messages']:
-    message.pretty_print()
-```
-
-执行结果如下：
-
-```python
-================================ Human Message =================================
-
-杭州今天天气如何?
-================================== Ai Message ==================================
-
-我来帮您查询杭州今天的天气情况。
-Tool Calls:
-  get_weather (call_00_FETE4MIR9p1Gr6uszgjcko6m)
- Call ID: call_00_FETE4MIR9p1Gr6uszgjcko6m
-  Args:
-    location: 杭州
-================================= Tool Message =================================
-Name: get_weather
-
-Current weather in 杭州 is sunny
-================================== Ai Message ==================================
-
-根据查询结果，杭州今天的天气是晴朗的。天气很好，适合外出活动！
-```
-
-流程图：
-
-![]()
-
-
-
-由此可见，所谓的工具，本质就是一个**可调用的函数**，要想让Agent知道有哪些工具可调用，该如何调用这些工具，就必须把这个函数的详细信息发送给模型。包括：
-
-* 函数名
-
-* 函数的作用
-
-* 函数的参数和返回值信息
-
-
-
-所以，定义工具的时候，关键就是把这些信息描述清楚即可。
-
-
-
-## 5.2 自定义工具
-
-在LangChain中，定义工具的过程被大大简化，与定义普通函数几乎没什么差别，只是在一些细节上需要注意。
-
-
-
-首先，定义工具需要在函数上添加`@tool`装饰器。
-
-
-
-例如，我们定义一个计算平方根的数学工具：
-
-```python
-# 定义工具
-from langchain.tools import tool
-
-@tool
-def square_root(x: float) -> float:
-    """计算指定数字的平方根"""
-    return x ** 0.5
-```
-
-
-
-智能体在工作时，需要将函数的名称、输入、作用传递给大模型，默认情况下这些信息的来源是：
-
-* 工具名称：函数名
-
-* 工具输入：函数入参
-
-* 工具作用：函数的注释
-
-
-
-当然，我们可以通过tool装饰器来覆盖上述信息：
-
-* 通过装饰器定义工具名称
-
-```python
-@tool("square_root")
-def tool1(x: float) -> float:
-    """Calculate the square root of a number"""
-    return x ** 0.5
-```
-
-* 通过装饰器定义工具作用描述
-
-```python
-@tool("square_root", description="Calculate the square root of a number")
-def tool1(x: float) -> float:
-    return x ** 0.5
-```
-
-
-
-* 通过装饰器定义工具入参约束
-
-如果要覆盖工具的入参信息则会复杂很多，我们要借助于Pydantic或JSON约束。
-
-
-
-例如，我们需要定义个查询天气的tool，借助于Pydantic来约束入参。
-
-我们定义一个入参的模型，在模型中添加入参描述信息：
-
-```python
-# 例如一个查询天气的tool
-class WeatherInput(BaseModel):
-    """查询天气的输入参数."""
-    location: str = Field(description="City name or coordinates")
-    units: Literal["celsius", "fahrenheit"] = Field(
-        default="celsius",
-        description="Temperature unit preference"
-    )
-    include_forecast: bool = Field(
-        default=False,
-        description="Include 5-day forecast"
-    )
-```
-
-定义工具，使用定义的模型来约束入参：
-
-```python
-# 定义一个查询天气的tool
-@tool(args_schema=WeatherInput)
-def get_weather(location: str, units: str = "celsius", include_forecast: bool = False) -> str:
-    """Get current weather and optional forecast."""
-    temp = 22 if units == "celsius" else 72
-    result = f"Current weather in {location}: {temp} degrees {units[0].upper()}"
-    if include_forecast:
-        result += "\nNext 5 days: Sunny"
-    return result
-```
-
-
-
-工具定义好之后，调用方式与普通函数类似：
+第 2 部分用到 Tavily，需要把 `TAVILY_API_KEY` 加进 `.env`，并安装对应集成：
 
 ```bash
-# 调用数学工具
-tool1.invoke({"x": 467})
-
-# 调用查询天气工具
-get_weather.invoke({"location": "杭州", "include_forecast": True})
-```
-
-
-
-
-
-> **注意**：
->
-> 在LangChain中，作为工具的函数**有两个保留的参数名**，你的自定义参数不能与之重复！他们是：
->
-> * **config**：用来传递运行时配置
->
-> * **runtime**：用来传递运行时上下文
->
-> 
->
-> 具体可参考官方文档：[保留参数名（Reserved argument names）](https://docs.langchain.com/oss/python/langchain/tools#reserved-argument-names)，后续我们会讲到这两个参数的用法。
-
-
-
-当我们创建智能体时，可以把定义好的工具传递给智能体，将来模型就能得到工具信息，并根据情况判断是否需要调用工具，需要调用哪个工具了。
-
-```bash
-from langchain.agents import create_agent
-
-# 创建智能体，并添加工具
-agent = create_agent(
-    model="deepseek-chat",
-    tools=[tool1, get_weather],
-    system_prompt="你是一个智能助手，你使用工具来解决用户问题。"
-)
-```
-
-
-
-接下来，调用智能体，向其提问，模型会自动根据用户问题判断：
-
-* 是否需要调用工具？
-
-* 该调用哪个工具？
-
-* 该传递那些参数？
-
-并且在调用工具之后，根据工具执行结果给用户生成响应。
-
-```python
-# 调用智能体
-for token, metadata in agent.stream(
-    {"messages": [HumanMessage(content="467的平方根是多少?")]},
-    stream_mode="messages"
-):
-    print(token.content, end="", flush=True)
-    
-
-for token, metadata in agent.stream(
-    {"messages": [HumanMessage(content="北京和杭州接下来几天天气如何?")]},
-    stream_mode="messages"
-):
-    print(token.content, end="", flush=True)
-```
-
-
-
-如果采用stream模式的updates模式，可以看到工具调用的具体步骤：
-
-```python
-for chunk in agent.stream(
-    {"messages": [HumanMessage(content="467、529的平方根是多少?")]},
-    stream_mode="updates"
-):
-    for step, data in chunk.items():
-        print(f"step: {step}")
-        print(f"content: {data['messages'][-1].content_blocks}")
-        print()
-```
-
-输出如下：
-
-```sql
-step: model
-content: [{'type': 'text', 'text': '我来帮你计算这两个数的平方根。'}, {'type': 'tool_call', 'id': 'call_00_oWChR8Xgo21mmWKW0SP9uOS9', 'name': 'square_root', 'args': {'x': 467}}, {'type': 'tool_call', 'id': 'call_01_UqzhGeRNcoSoidItA0gScaoY', 'name': 'square_root', 'args': {'x': 529}}]
-
-step: tools
-content: [{'type': 'text', 'text': '21.61018278497431'}]
-
-step: tools
-content: [{'type': 'text', 'text': '23.0'}]
-
-step: model
-content: [{'type': 'text', 'text': '计算结果如下：\n\n- **467的平方根** ≈ 21.6102\n- **529的平方根** = 23.0（因为23 × 23 = 529，所以529是完全平方数）\n\n所以：\n- √467 ≈ 21.6102\n- √529 = 23'}]
-
-```
-
-
-
-
-
-工作流程如图：
-
-![]()
-
-
-
-## 5.3 预定义工具
-
-LangChain中提供了很多预定义好的工具，方便我们使用，可使用的预定义工具列表可参考官网：
-
-
-
-例如，模型本身只能根据本身的训练数据回答问题，无法获取实时信息。但如果我们给它提供了web搜索的工具，那么你的Agent就如同具备了实时web搜索的能力，回答会更加准确。
-
-
-
-有一个专门用于给Agent提供Web搜索的工具，叫做Tavily，官网如下：
-
-<iframe src="https://www.tavily.com/" sandbox="allow-scripts allow-same-origin allow-presentation allow-forms allow-popups allow-downloads" allowfullscreen allow="encrypted-media; fullscreen; autoplay" referrerpolicy="strict-origin-when-cross-origin" frameborder="0" style="width: 100%; min-height: 461px; border-radius: 8px;"></iframe>
-
-
-
-在LangChain中也提供了对Tavily的支持：
-
-
-
-要使用这个工具，步骤如下：
-
-### 5.3.1 注册账号
-
-首先，我们要在Tavily官网注册一个账号，可以选择邮箱注册，或者直接用google、github登录：
-
-![](./images/image-4.png)
-
-注册成功后，我们登录后台（https://app.tavily.com/home），即可看到一个默认的API\_KEY：
-
-![](./images/image-5.png)
-
-
-
-### 5.3.2 配置环境变量
-
-接下来，我们需要把这个KEY配置到我们的.env文件中：
-
-![](./images/image-6.png)
-
-
-
-### 5.3.3 安装依赖
-
-然后，我们需要安装langchain-tavily的依赖：
-
-```bash
-# 使用uv的环境
 uv add langchain-tavily
 ```
 
+第 3 部分用 `requests` 调 HTTP API。它在当前环境里已安装，但项目依赖文件没有显式声明，新环境里补一句：
 
+```bash
+uv add requests
+```
 
-### 5.3.4 使用工具
+章节目录里还保留着两个 notebook，可以对照看：[预定义工具 Tavily](./notebooks/01-LangChain-预定义Tool.ipynb) 和 [DeepSeek 自定义搜索工具](./notebooks/02-Deepseek-自定义Tool.ipynb)。第二个 notebook 里的搜索工具用的是 `args_schema=DeepSeekSearchInput`，属于方式三；本篇按方式二改写，把用途放进 docstring，参数只用类型注解。两边调用的是同一个 API，差别只在工具说明怎么来。notebook 里出现的 `deepseek-v4-flash` 与本篇的 `deepseek-flash` 也只是名称差异。
 
-接下来，就可以使用tavily来做web搜索了：
+### 2.3 五个脚本的落点与运行命令
+
+五个脚本都放在 `LangChain入门笔记/04-LangChain-Tool调用/` 下，从项目根目录用完整相对路径运行。第 3 部分的脚本会真的发起搜索和 OCR 请求，需要有效的 `DEEPSEEK_API_KEY`；它还在系统临时目录里做文件读写删和命令演示，不会碰项目里的文件。
+
+## 3. 预定义工具：以 TavilySearch 为主
+
+### 3.1 直接用现成的工具
+
+自己写工具之前，先看生态里有没有现成的。搜索、网页抓取、论文检索、文件操作这些都有人封装好了，装一个集成包就能交给 `create_agent`。本节只把一个讲透：TavilySearch，用来做实时网页搜索。
+
+### 3.2 Tavily 账号、密钥与环境变量
+
+到 [Tavily](https://www.tavily.com/) 注册账号，在控制台拿到 API Key。
+
+![Tavily 注册入口](./images/image-4.png)
+
+![Tavily 控制台页面](./images/image-5.png)
+
+把密钥写进项目根目录的 `.env`：
+
+```dotenv
+TAVILY_API_KEY=你的实际密钥
+```
+
+![在 .env 中配置 TAVILY_API_KEY](./images/image-6.png)
+
+### 3.3 TavilySearch 直接调用
+
+预定义工具也是一个工具对象，可以直接 `invoke`，不必先接进 Agent。下面的 `max_results` 控制返回条数，`topic="general"` 表示通用网页搜索，其他参数暂时用默认值。
+
+从零搭建项目时，把下面的代码保存到章节目录，文件名为 `04-tavily-search.py`。配套仓库已提供 [04-tavily-search.py](./04-tavily-search.py)。在项目根目录运行：
+
+```bash
+uv run "LangChain入门笔记/04-LangChain-Tool调用/04-tavily-search.py"
+```
 
 ```python
-# 使用tavily作为web搜索工具
+from dotenv import load_dotenv
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain.messages import HumanMessage, ToolMessage
 from langchain_tavily import TavilySearch
 
-# 初始化工具，并设置参数，具体参数设置参考官网
-tool = TavilySearch(
-    max_results=5,
-    topic="general",
-    # include_answer=False,
-    # include_raw_content=False,
-    # include_images=False,
-    # include_image_descriptions=False,
-    # search_depth="basic",
-    # time_range="day",
-    # include_domains=None,
-    # exclude_domains=None
+load_dotenv()
+
+tavily = TavilySearch(max_results=5, topic="general")
+
+result = tavily.invoke({"query": "杭州今天天气如何？"})
+if isinstance(result, dict):
+    for item in result.get("results", []):
+        print(item["title"])
+        print(item["url"])
+        print(item.get("content", "")[:200])
+else:
+    print(result)
+
+model = init_chat_model(
+    model="deepseek-flash",
+    extra_body={"thinking": {"type": "disabled"}},
 )
-```
-
-这里我们无需自己定义工具，而是直接导入即可，然后根据自己的需要设置参数。
-
-
-
-完整的参数设置参考官网：[langchain官网参考](https://docs.langchain.com/oss/python/integrations/tools/tavily_search)、[tavily官网参考](https://docs.tavily.com/documentation/api-reference/endpoint/search)
-
-
-
-试试看调用工具：
-
-```bash
-tool.invoke("杭州今天天气如何？")
-```
-
-结果：
-
-```sql
-{'query': '杭州今天天气如何？',
- 'follow_up_questions': None,
- 'answer': None,
- 'images': [],
- 'results': [{'url': 'https://weathernew.pae.baidu.com/weathernew/pc?query=%E6%B5%99%E6%B1%9F%E6%9D%AD%E5%B7%9E%E5%A4%A9%E6%B0%94&srcid=4982',
-   'title': '杭州 - 百度',
-   'content': '杭州 今天：多云 9°~16°C 东北风2级. 02月28日 周六 农历正月十二. 9°. 20 优. 晴 ... 生活气象指数 夜深了，天气不好，也记得让心情保持舒畅哦. 穿衣: 大衣类. 9℃~16',
-   'score': 0.9999329,
-   'raw_content': None},
-  {'url': 'https://www.hzqx.cn/pc/hztq/',
-   'title': '杭州气象',
-   'content': '... 今日天气，杭州周末天气，杭州一周天气预报，杭州天气预报，杭州14日天气预报，还提供杭州的生活指数、健康指数、交通指数、旅游指数，及时发布杭州气象预警信号、各类气象资讯。',
-   'score': 0.9996724,
-   'raw_content': None},
-  {'url': 'https://www.wunderground.com/weather/cn/hangzhou',
-   'title': "Hangzhou, People's Republic Of China Weather Conditions",
-   'content': "Skip to Main Content \\_. * *gps\\_fixed*Find Nearest Station. *account\\_box* Log in Go Ad Free*settings* SettingsSensor NetworkMaps & RadarSevere WeatherNews & BlogsMobile AppsHistorical Weather. * *gps\\_fixed*Find Nearest Station. **30.25** °N, **120.2** °E. # Hangzhou, Zhejiang, People's Republic of China Weather Conditions*star\\_rate**home*. icon50\xa0°F Hangzhou Xiaoshan Intl Airport Station|Report. Thank you for reporting this station. We will review the data in question. You are about to report this weather station for bad data. Please select the information that is incorrect. Hangzhou Xiaoshan Intl Airport (ZSHC). Location: **Hangzhou, Zhejiang, People's Republic of China**. Reset Map, or Add PWS. *access\\_time* **3:46 PM CST on February 24, 2026** (GMT +8) | Updated just now. Tomorrow's temperature is forecast to be NEARLY THE SAME as today. TonightMon 02/23 Low 45\xa0°F. Winds N at 5 to 10 mph. TomorrowTue 02/24 High 55\xa0°F. Winds ENE at 5 to 10 mph. Tomorrow nightTue 02/24 Low 48\xa0°F. Winds E at 5 to 10 mph. Tomorrow will be 1 minutes 46 seconds longer.",
-   'score': 0.99957615,
-   'raw_content': None},
-  {'url': 'https://www.nmc.cn/publish/forecast/AZJ/hangzhou.html',
-   'title': '杭州-天气预报 - 中央气象台',
-   'content': '北京 18.3℃ 西南风 微风. 发布时间：02-10 20:00. 国家气象中心 版权所有 Copyright©2009-2026. 制作维护：国家气象中心预报系统开放实验室 地址：北京市中关村南大街46号 邮编：100081.',
-   'score': 0.99736834,
-   'raw_content': None},
-  {'url': 'https://www.accuweather.com/zh/cn/hangzhou/106832/weather-forecast/106832',
-   'title': '杭州, 浙江省, 中國三日天氣預報 - AccuWeather',
-   'content': '# 杭州, 浙江省. ## 全球範圍. ### 颶風. ### 惡劣天氣. ### 雷達與氣象圖. ### 視訊. ## 今天. ## 目前天氣. ## 展望未來. ## 杭州 氣象雷達圖. ## 每小時預測. ## 每日預報. ## 太陽和月亮. ## 空氣品質. ## 過敏展望. ## 附近地方:.',
-   'score': 0.99528164,
-   'raw_content': None}],
- 'response_time': 0.63,
- 'request_id': '1ab6bd73-98c6-4643-82d0-202f38f775c8'}
-```
-
-
-
-### 5.3.5 结合智能体
-
-我们结合智能体来使用Tavily搜索工具：
-
-```bash
-# 创建智能体，使用预定义工具tavily
 agent = create_agent(
-    model="deepseek-chat",
-    tools=[tool],
-    system_prompt="你是一个智能助手，你使用工具来解决用户问题。"
+    model=model,
+    tools=[tavily],
+    system_prompt="涉及实时信息时先使用网页搜索，并在回答中注明来源。",
 )
 
-# 调用工具
-for chunk in agent.stream(
-    {"messages": [HumanMessage(content="北京接下来5天天气如何?")]},
-    stream_mode="updates"
+for step in agent.stream(
+    {"messages": [HumanMessage("请搜索北京未来五天的天气预报。")]},
+    stream_mode="updates",
 ):
-    for step, data in chunk.items():
-        print(f"step: {step}")
-        print(f"content: {data['messages'][-1].content_blocks}")
-        print()
+    for messages in step.values():
+        for message in messages:
+            if isinstance(message, ToolMessage):
+                print("工具返回：", message.content[:300])
 ```
 
+前半段打印的是搜索结果，每条有标题、链接和正文片段。返回内容里还带 `answer`、`images`、`response_time` 等字段，这里只取需要的三项。 [Tavily 集成文档](https://docs.langchain.com/oss/python/integrations/tools/tavily_search) · [Tavily API 参考](https://docs.tavily.com/documentation/api-reference/endpoint/search)
 
+### 3.4 TavilySearch 接入 Agent
 
-执行过程：
+同一段代码的后半部分把 `tavily` 交给 `create_agent`，并加了一句系统提示词：涉及实时信息先搜索，回答里注明来源。`system_prompt` 在这里只负责表达偏好，真正决定参数的是工具对象自己带的说明，这与第 1 章讲的是同一套机制。
 
-```json
-step: model
-content: [{'type': 'text', 'text': '我来帮您查询北京接下来5天的天气情况。'}, {'type': 'tool_call', 'id': 'call_00_e0PbwzrTI77ojtewzw9VuPfR', 'name': 'tavily_search', 'args': {'query': '北京未来5天天气预报', 'search_depth': 'basic', 'time_range': 'day'}}]
+`stream_mode="updates"` 会逐步给出每一步的状态更新，遍历时挑出 `ToolMessage` 打印，就能看到模型填的搜索词和搜索结果。第 3 篇还介绍过 `stream.tool_calls`，那种写法能直接看到工具调用的开始和结束，两种观察方式选一个用即可。
 
-step: tools
-content: [{'type': 'text', 'text': '{"query": "北京未来5天天气预报", "follow_up_questions": null, "answer": null, "images": [], "results": [{"url": "https://www.bjfsh.gov.cn/zhxw/fsdt/202602/t20260228_40112151.shtml", "title": "未来一周气温“过山车”！具体预报—— - 房山区", "content": "访问我的专属空间 公务员邮箱 繁体; \\"繁体\\") 简体; \\"简体\\") 无障碍 长者专区. 日期:2026-02-28 09:47\xa0\xa0\xa0\xa0 来源:北京发布微信公众号 气象北京微信公众号. 北京市气象台27日14时发布：今天下午阴转多云，偏南风二三级，**最高气温7℃；**夜间多云转阴，南转东风一二级，**最低气温-1℃。**今天气温下降，外出注意防寒保暖。. 雨雪过后，部分路面湿滑，**目前平谷、房山、密云、门头沟、昌平、延庆、怀柔区仍处于道路结冰黄色预警中，**提醒大家出行注意安全，驾车减速慢行，保持车距。. 未来三天，我市低层湿度较大，天气以多云到阴天为主，气温较低。**明天白天最高气温将降至4℃左右，西部北部有雨夹雪，**户外体感阴冷，大家外出要多穿一点，以免着凉感冒。. **3日（元宵节）白天最高气温将升至10℃左右，**大部分时间比较适宜大家出行，夜间最低气温-1℃，户外活动需注意保暖。下周冷空气活动频繁，天空云量较多，气温波动起伏，请关注临近预报，根据天气和气温变化，适时调整着装。. **27日（星期五）下午：**阴转多云；偏南风2、3级；**平原地区最高气温7℃，**山区最高气温5～7℃；最小相对湿度40%。. **27日夜间：**多云转阴；南转东风1、2级；平原地区最低气温-1℃，山区最低气温-4～-3℃；最大相对湿度85%。. **28日（星期六）白天：**阴，**西部、北部有雨夹雪；**东转南风2、3级；**平原地区最高气温4℃，**山区最高气温2～4℃；最小相对湿度50%。. **28日夜间：**阴，**山区有零星小雪；**南转北风1、2级；平原地区最低气温-1℃，山区最低气温-5～-2℃。. **1日（星期日）白天：**阴转多云；北转南风2、3级；**平原地区最高气温5℃**，山区最高气温4～6℃。. **1日夜间：**多云转阴；南转北风1、2级；平原地区最低气温0℃，山区最低气温-3～-1℃。. * 客服信箱：webmaster@bjfsh.gov.cn.", "score": 0.72231215, "raw_content": null}, {"url": "https://news.bjd.com.cn/2026/02/28/11605674.shtml", "title": "未来三天北京多弱雨雪，4日夜间至5日白天将有降雪 - 新闻- 京报网", "content": "热\xa0\xa0点 锐\xa0\xa0评 发布厅 城\xa0\xa0事 影\xa0\xa0视 视\xa0\xa0觉 京\xa0\xa0剧 汽\xa0\xa0车 纸上听 时\xa0\xa0事 学\xa0\xa0习 都视频 艺\xa0\xa0绽 深\xa0\xa0读 京\xa0\xa0味 体\xa0\xa0育 天\xa0\xa0下 长\xa0\xa0城 经\xa0\xa0济. 热点 锐评 城事 影视 辟谣 京剧 都视频 电子报 汽车 时事 学习 视觉 艺绽 深读 京味 纸上听 体育 天下 长城 经济 北京民声 北晚在线. 今天白天北京天空阴沉，有弱雨雪天气，最高气温仅为2℃左右，体感阴冷，外出注意防寒保暖和交通安全。夜间山区仍有零星小雪，最低气温在冰点以下。. 阴，平原地区有雨夹雪，山区有小雪；偏东风2级；2～1℃。. 阴；偏北风1、2级；-1～1℃。. 28日（周六）下午：阴，平原地区有雨夹雪，山区有小雪；偏东风2级左右；平原地区最高气温2℃，山区最高气温0～2℃；最小相对湿度50%。. 28日夜间：阴，山区有零星小雪；东转北风1、2级；平原地区最低气温-1℃，山区最低气温-5～-4℃；最大相对湿度70%。. 3月1日（周日）白天：阴转多云；北转南风2、3级；平原地区最高气温6℃，山区最高气温5～7℃；最小相对湿度50%。. 3月1日夜间：多云转阴，大部地区有雨夹雪或小雪；南转北风1、2级；平原地区最低气温0℃，山区最低气温-2～-1℃。. 2日（周一）白天：阴，大部地区有雨夹雪或零星小雪；北转南风2、3级；平原地区最高气温6℃，山区最高气温2～4℃。. 2日夜间：阴，山区有小雪；南转北风1、2级；平原地区最低气温-1℃，山区最低气温-2～-1℃。. 明天北京整体还是阴到多云为主，湿度较大，白天最高气温6℃左右。3月1日夜间到2日白天大部地区有雨夹雪或小雪天气，雨雪将导致路面湿滑、能见度下降，对2日（周一）早高峰有不利影响，外出注意防范雨雪和行车安全。. 3月1日至8日气温变化幅度较大，最高气温3~10℃，最低气温-4~1℃。. 如遇作品内容、版权等问题，请在相关文章刊发之日起30日内与本网联系。版权侵权联系电话：010-85202353. 人民网 新华网 央视网 光明网 中国网 中国日报网 中国经济网 千龙网 今日头条 百度 新浪 网易 腾讯 搜狐 爱奇艺 优酷. 主管：北京日报报业集团 主办：京报移动传媒有限公司 Copyright ©1996-2026 Beijing Daily Group, All Rights Reserved. 互联网新闻信息服务许可证11120180001号 网络出版服务许可证（京）字第338号 信息网络传播视听节目许可证0122682号 广播电视节目制作经营许可证（京）字第00693号. 京公网安备11040202440037号  工信部备案号：京ICP备16035741号-1 京新网备2010001号   网上有害信息举报专区    北京互联网举报中心. Copyright ©1996-2026 Beijing Daily Group, All Rights Reserved.", "score": 0.64478505, "raw_content": null}, {"url": "https://cj.sina.com.cn/articles/view/1617264814/606580ae02002jbfe", "title": "未来三天北京多弱雨雪，4日夜间至5日白天将有降雪 - 新浪财经", "content": "外汇 管理 消费 科技 互联网 手机. 保险 数码 科普 创业 银行 新三板 其他. # 未来三天北京多弱雨雪，4日夜间至5日白天将有降雪. 语音播报 缩小字体 放大字体 微博 微信 分享 0. 今天白天北京天空阴沉，有弱雨雪天气，最高气温仅为2℃左右，体感阴冷，外出注意防寒保暖和交通安全。夜间山区仍有零星小雪，最低气温在冰点以下。. 阴，平原地区有雨夹雪，山区有小雪；偏东风2级；2～1℃。. 阴；偏北风1、2级；-1～1℃。. 28日（周六）下午：阴，平原地区有雨夹雪，山区有小雪；偏东风2级左右；平原地区最高气温2℃，山区最高气温0～2℃；最小相对湿度50%。. 28日夜间：阴，山区有零星小雪；东转北风1、2级；平原地区最低气温-1℃，山区最低气温-5～-4℃；最大相对湿度70%。. 3月1日（周日）白天：阴转多云；北转南风2、3级；平原地区最高气温6℃，山区最高气温5～7℃；最小相对湿度50%。. 3月1日夜间：多云转阴，大部地区有雨夹雪或小雪；南转北风1、2级；平原地区最低气温0℃，山区最低气温-2～-1℃。. 2日（周一）白天：阴，大部地区有雨夹雪或零星小雪；北转南风2、3级；平原地区最高气温6℃，山区最高气温2～4℃。. 2日夜间：阴，山区有小雪；南转北风1、2级；平原地区最低气温-1℃，山区最低气温-2～-1℃。. 明天北京整体还是阴到多云为主，湿度较大，白天最高气温6℃左右。3月1日夜间到2日白天大部地区有雨夹雪或小雪天气，雨雪将导致路面湿滑、能见度下降，对2日（周一）早高峰有不利影响，外出注意防范雨雪和行车安全。. 3月1日至8日气温变化幅度较大，最高气温3~10℃，最低气温-4~1℃。. ## 头条号入驻. ## 财经自媒体联盟更多自媒体作者. ## 热文排行榜. * 04 在美国，我感受到“越南制造”在取代“中国制造”. * 06 三星“宫心计”：儿子检举父亲，父母逼死女儿. * 10 56岁创业，年利是华为1.5倍，他是让对手发抖的人！. 关于头条 | 如何入驻 | 发稿平台 | 奖励机制 版权声明 | 用户协议 | 帮助中心. Copyright © 1996-2019 SINA Corporation. All Rights Reserved 新浪公司 版权所有.", "score": 0.61307496, "raw_content": null}, {"url": "https://www.nmc.cn/f/index-1.html", "title": "关注阴晴冷暖，守望四时安康 - 中央气象台", "content": "北京 18.3℃ 西南风 微风. 北方冬麦区气象条件利于小麦越冬 5-7日中东部雨雪降温影响设施农业生产 未来10天江南西部和西南地区东部多阴雨 须注意防范湿渍害. [2026年2月9日[新闻直播间]中央气象台\\\\_中东部气温波动回升\\\\_累积升幅可超10℃](/publish/cms/view/c5e4387dc33441e4853dead0d400b0b9.html). [2026年2月9日[新闻直播间]中央气象台\\\\_江南等地雨雪再度发展\\\\_春运出行需防范](/publish/cms/view/5db2a19c37264a97a634ab5afd39ed17.html). [2026年2月6日[新闻直播间]中央气象台\\\\_寒潮影响持续\\\\_江南局地降温将超12℃](/publish/cms/view/6fb5e2802bc5421480f4b5eb463ff0d6.html). #### 城市定制. 关于我们 联系方式 网站声明 业务信息 网站动态 网站地图 触摸屏版. 国家气象中心 版权所有 Copyright©2009-2026. 制作维护：国家气象中心预报系统开放实验室 地址：北京市中关村南大街46号 邮编：100081.", "score": 0.57236487, "raw_content": null}, {"url": "https://www.qweather.com/weather30d/beijing-101010100.html", "title": "北京市未来30天天气预报", "content": "北京市. 中国. 2026-02-28. 未来30天将有3天下雪，最高温20°（03月13日，03月14日），最低温-4°（03月05日）。 日. 一. 二. 三. 四. 五. 六. 28 QWeather. 2°~0°.", "score": 0.5125224, "raw_content": null}], "response_time": 0.8, "request_id": "1809e393-2e22-48c9-bed9-33698921890a"}'}]
+### 3.5 其他预定义工具清单
 
-step: model
-content: [{'type': 'text', 'text': '让我搜索更具体的北京未来5天天气预报信息：'}, {'type': 'tool_call', 'id': 'call_00_SEyG6p5wcIoz6exnXKvBxt88', 'name': 'tavily_search', 'args': {'query': '北京天气预报未来5天详细气温降水风力', 'search_depth': 'advanced', 'time_range': 'day'}}]
+下面这些工具都能在 LangChain 生态里找到，列出来是为了知道有什么可用，不逐个展开：
 
-step: tools
-content: [{'type': 'text', 'text': '{"query": "北京天气预报未来5天详细气温降水风力", "follow_up_questions": null, "answer": null, "images": [], "results": [{"url": "https://m.weather.com.cn/mweather15d/101010100.shtml", "title": "北京天气预报15天查询", "content": "|  |  |  |  |\\n   ---  --- |\\n  |  |  |  |  |\\n 4/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东风<3级  东北风<3级 |  |  | 详情 |\\n 周日\\n\\n  03/01\\n\\n  多云转阴\\n\\n  5/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东南风<3级  南风<3级 |  |  | 详情 |\\n 周一\\n\\n  03/02\\n\\n  阴\\n\\n  5/-1℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  南风<3级 |  |  | 详情 |\\n 周二\\n\\n  03/03\\n\\n  多云\\n\\n  10/-1℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 北风<3级  北风<3级 |  |  | 详情 |\\n 周三\\n\\n  03/04\\n\\n  多云\\n\\n  6/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东北风<3级  东风<3级 |  |  | 详情 |\\n 周四\\n\\n  03/05\\n\\n  阴\\n\\n  5/-3℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西风<3级  西北风<3级 |  |  | 详情 |\\n 周五\\n\\n  03/06\\n\\n  阴转雨夹雪\\n\\n  6/-1℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西南风<3级  东南风<3级 |  |  | 详情 |\\n 周六\\n\\n  03/07\\n\\n  雨转雨夹雪\\n\\n  7/-2℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  东南风<3级 |  |  | 详情 |\\n 周日\\n\\n  03/08\\n\\n  雨转阴\\n\\n  9/-2℃ [...] 03/08\\n\\n  雨转阴\\n\\n  9/-2℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东南风<3级  南风<3级 |  |  | 详情 |\\n 周一\\n\\n  03/09\\n\\n  阴转雪\\n\\n  9/-4℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西南风<3级  东北风<3级 |  |  | 详情 |\\n 周二\\n\\n  03/10\\n\\n  多云转阴\\n\\n  5/-2℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东南风<3级  南风<3级 |  |  | 详情 |\\n 周三\\n\\n  03/11\\n\\n  阴\\n\\n  9/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西南风<3级  东风<3级 |  |  | 详情 |\\n 周四\\n\\n  03/12\\n\\n  阴\\n\\n  10/3℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  南风<3级 |  |  | 详情 |\\n 周五\\n\\n  03/13\\n\\n  阴\\n\\n  13/4℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西南风<3级  西北风<3级 |  |  | 详情 |\\n\\n40天预报\\n\\n 温度趋势\\n 降水趋势\\n\\n台风中心\\n\\n利奇马\\n\\n|  |  |\\n --- |\\n| 到达时间： | 2020-05-16 |\\n| 中心位置： | 18.6N/120.1E |\\n| 风速风力： | 16米/秒 |\\n| 中心气压： | 1000（百帕） |\\n| 未来移速： | 17公里/小时 |\\n| 未来移项： | 北 |\\n\\n天气雷达\\n\\n我的天空\\n\\n精彩推荐\\n\\n北京天空现橙粉朝霞 为冬日添彩\\n\\n雨水：冰雪消融 雨水渐增\\n\\n天气  推荐 直播 图集 短视频 生活\\n\\n没有更多啦 ~\\n\\n请使用浏览器的分享功能分享 [...] 雨水：冰雪消融 雨水渐增\\n\\n天气  推荐 直播 图集 短视频 生活\\n\\n没有更多啦 ~\\n\\n请使用浏览器的分享功能分享\\n\\n放到  \\n桌面) 反馈\\n\\n 首页\\n 15天\\n 40天\\n 地图\\n 资讯\\n 更多", "score": 0.60666215, "raw_content": null}, {"url": "https://e.weather.com.cn/mweather15d/101010100.shtml", "title": "北京天气预报15天查询", "content": "|  |  |  |  |\\n   ---  --- |\\n  |  |  |  |  |\\n |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  东风<3级 |  |  | 详情 |\\n 周六\\n\\n  02/28\\n\\n  阴\\n\\n  4/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东风<3级  东北风<3级 |  |  | 详情 |\\n 周日\\n\\n  03/01\\n\\n  多云转阴\\n\\n  5/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东南风<3级  南风<3级 |  |  | 详情 |\\n 周一\\n\\n  03/02\\n\\n  阴\\n\\n  5/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  南风<3级 |  |  | 详情 |\\n 周二\\n\\n  03/03\\n\\n  多云\\n\\n  7/-1℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 北风<3级  北风<3级 |  |  | 详情 |\\n 周三\\n\\n  03/04\\n\\n  多云\\n\\n  6/-1℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东北风<3级  东风<3级 |  |  | 详情 |\\n 周四\\n\\n  03/05\\n\\n  多云\\n\\n  4/-1℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西风<3级  南风<3级 |  |  | 详情 |\\n 周五\\n\\n  03/06\\n\\n  多云\\n\\n  8/-2℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 北风<3级  东南风<3级 |  |  | 详情 |\\n 周六\\n\\n  03/07\\n\\n  雨转雨夹雪\\n\\n  9/0℃ [...] 03/07\\n\\n  雨转雨夹雪\\n\\n  9/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  东南风<3级 |  |  | 详情 |\\n 周日\\n\\n  03/08\\n\\n  阴转雨夹雪\\n\\n  11/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东北风<3级  东南风<3级 |  |  | 详情 |\\n 周一\\n\\n  03/09\\n\\n  雨转晴\\n\\n  10/0℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 南风<3级  北风<3级 |  |  | 详情 |\\n 周二\\n\\n  03/10\\n\\n  雨转晴\\n\\n  13/2℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 西南风<3级  南风<3级 |  |  | 详情 |\\n 周三\\n\\n  03/11\\n\\n  阴转雨\\n\\n  15/4℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东南风<3级  东北风<3级 |  |  | 详情 |\\n 周四\\n\\n  03/12\\n\\n  雨\\n\\n  7/4℃\\n\\n  |  |  |  |  |\\n   ---  --- |\\n  | 东北风<3级  北风<3级 |  |  | 详情 |\\n\\n40天预报\\n\\n 温度趋势\\n 降水趋势\\n\\n台风中心\\n\\n利奇马\\n\\n|  |  |\\n --- |\\n| 到达时间： | 2020-05-16 |\\n| 中心位置： | 18.6N/120.1E |\\n| 风速风力： | 16米/秒 |\\n| 中心气压： | 1000（百帕） |\\n| 未来移速： | 17公里/小时 |\\n| 未来移项： | 北 |\\n\\n天气雷达\\n\\n我的天空\\n\\n精彩推荐\\n\\n北京天空现橙粉朝霞 为冬日添彩\\n\\n雨水：冰雪消融 雨水渐增\\n\\n天气  推荐 直播 图集 短视频 生活\\n\\n没有更多啦 ~ [...] 雨水：冰雪消融 雨水渐增\\n\\n天气  推荐 直播 图集 短视频 生活\\n\\n没有更多啦 ~\\n\\n请使用浏览器的分享功能分享\\n\\n放到  \\n桌面) 反馈\\n\\n 首页\\n 15天\\n 40天\\n 地图\\n 资讯\\n 更多", "score": 0.5942929, "raw_content": null}, {"url": "https://www.weather.com.cn/weather/101010100.shtml?1263", "title": "27日（今天） - 天气", "content": "台风路径\\n空间天气\\n图片\\n专题\\n环境\\n旅游\\n碳中和\\n气象科普\\n一带一路\\n产创平台\\n\\n热门城市\\n\\n热门景点\\n\\n选择省市\\n\\n<<返回\\n全国\\n\\n周边城市\\n\\n周边景点\\n\\n本地乡镇\\n\\n热门城市\\n\\n选择洲际\\n\\n# 24日（今天）\\n\\n晴转多云\\n\\n9/2℃\\n\\n<3级\\n\\n# 25日（明天）\\n\\n多云转小雨\\n\\n10/3℃\\n\\n<3级\\n\\n# 26日（后天）\\n\\n雨夹雪转阴\\n\\n4/0℃\\n\\n<3级\\n\\n# 27日（周五）\\n\\n多云转阴\\n\\n6/0℃\\n\\n<3级\\n\\n# 28日（周六）\\n\\n阴\\n\\n4/0℃\\n\\n<3级\\n\\n# 1日（周日）\\n\\n多云转阴\\n\\n4/0℃\\n\\n<3级\\n\\n# 2日（周一）\\n\\n阴\\n\\n5/0℃\\n\\n<3级\\n\\n### 蓝天预报综合天气现象、能见度、空气质量等因子，预测未来一周的天空状况。\\n\\n无明显降温，感冒机率较低。\\n\\n气温较低，在户外运动请注意增减衣物。\\n\\n无需担心过敏，可放心外出，享受生活。\\n\\n建议着厚外套加毛衣等服装。\\n\\n无雨且风力较小，易保持清洁度。\\n\\n涂擦SPF大于15、PA+防晒护肤品。\\n\\n无明显降温，感冒机率较低。\\n\\n天气凉，在户外运动请注意增减衣物。\\n\\n无需担心过敏，可放心外出，享受生活。\\n\\n建议着厚外套加毛衣等服装。\\n\\n有雨，雨水和泥水会弄脏爱车。\\n\\n涂擦SPF大于15、PA+防晒护肤品。\\n\\n大幅度降温，适当增加衣服。\\n\\n有降水，推荐您在室内进行休闲运动。\\n\\n无需担心过敏，可放心外出，享受生活。\\n\\n建议着厚羽绒服等隆冬服装。\\n\\n有雪，雪水和泥水会弄脏爱车。\\n\\n辐射弱，涂擦SPF8-12防晒护肤品。\\n\\n天冷易感冒，注意防范。\\n\\n天气寒冷，推荐您进行室内运动。\\n\\n无需担心过敏，可放心外出，享受生活。\\n\\n建议着棉衣加羊毛衫等冬季服装。\\n\\n天气较好，适合擦洗汽车。\\n\\n涂擦SPF大于15、PA+防晒护肤品。\\n\\n寒冷潮湿，易发生感冒。\\n\\n天气寒冷，推荐您进行室内运动。 [...] # 雷达图\\n\\n# 联播天气预报\\n\\n# 更多>>高清图集\\n\\n沉浸式体验大江南北的年货大集烟火气\\n北京月坛公园：蜡梅凝香蜜蜂舞\\n广西南宁青秀山新春灯会里的光影盛景\\n海南儋州天气晴好 早稻插秧忙\\n当极光撞进星河 赴一场极致浪漫\\n山东威海气温低迷 植物染白霜\\n\\n# 天气视频\\n\\n正月初七 马驮寿桃 健康长寿\\n\\n正月初六 马踏穷尘 万事顺意\\n\\n正月初五 金马开库 破五迎财\\n\\n# >> 生活旅游\\n\\n雨水这样过：占稻色回娘家 充满无限希望\\n雨水时节话养生 护脾阳祛寒湿\\n天气忽冷忽热 防感冒做好“三勤三避一加强”\\n雨后峨眉沟壑尽显 金顶显真容\\n秋意浓 蓝天映衬下的哈尔滨伏尔加庄园\\n大美新疆—帕米尔高原好风光\\n\\n### 景点推荐\\n\\n#### 景区天气气温 旅游指数\\n\\n# 气象产品\\n\\n# 气象服务\\n\\n# 天气预报电话查询\\n\\n拨打12121或96121进行天气预报查询\\n\\n# 手机查询\\n\\n随时随地通过手机登录中国天气WAP版查看各地天气资讯\\n\\n### 网站服务\\n\\n关于我们联系我们用户反馈\\n\\n版权声明网站律师\\n\\n### 营销中心\\n\\n商务合作广告服务媒资合作\\n\\n### 相关链接\\n\\n中国气象局中国气象服务协会 中国天气频道\\n\\n客服邮箱：service@weather.com.cn客服电话：010-68409444京ICP证010385-2号\u3000京公网安备11041400134号 [...] 寒潮影响趋于结束我国雨雪范围缩减 中东部开启升温模式\\n\\n## 寒潮影响趋于结束我国雨雪范围缩减 中东部开启升温模式\\n\\n今天（2月17日），寒潮影响趋于结束，中东部大部地区开启升温模式，20日前后20℃最北端可达华北南部一带。今明天，我国雨雪范围缩减。\\n\\n2月16日\\n\\n寒潮继续南下！除夕南方多地迎断崖式降温 湖北湖南部分地区有中雨\\n\\n## 寒潮继续南下！除夕南方多地迎断崖式降温 湖北湖南部分地区有中雨\\n\\n今天（2月16日），寒潮主体继续南下，江南多地将迎断崖式降温，公众加强保暖措施。同时，江淮、江南多地仍有雨雪天气。\\n\\n2月15日\\n\\n春节假期开端我国降水增多增强 寒潮携降温影响中东部\\n\\n## 春节假期开端我国降水增多增强 寒潮携降温影响中东部\\n\\n今天（2月15日）是春节假期第一天，我国降水增多增强，同时，寒潮将自北向南影响中东部，不少地方迎换季式降温。\\n\\n2月14日\\n\\n大回暖持续黄淮一带暖得同期少见 明起我国降雨增多增强\\n\\n## 大回暖持续黄淮一带暖得同期少见 明起我国降雨增多增强\\n\\n今天（2月14日），中东部多地继续回暖模式，黄淮一带将体验同期少见的暖。明天随着一场寒潮的到来，降雨会增多增强，中东部也会陆续迎来明显降温。\\n\\n2月13日\\n\\n全国大部持续回暖 西南至江南降雨将发展增多\\n\\n## 全国大部持续回暖 西南至江南降雨将发展增多\\n\\n今明两天（2月13日至14日），北方大部雨雪依然稀少，西南至江南一带降雨将发展增多，冷空气影响间歇期间，全国大部持续升温。\\n\\n2月10日\\n\\n南北方陆续开启升温多地感受超前暖意 12日起南方再迎新一轮降水\\n\\n## 南北方陆续开启升温多地感受超前暖意 12日起南方再迎新一轮降水\\n\\n今明天（2月10日至11日），我国雨雪天气减少，但12日前后南方将再迎新一轮降水过程，江南局地雨势较强，。同时，南北方今明天陆续开启升温模式。\\n\\n# 雷达图", "score": 0.434102, "raw_content": null}, {"url": "https://www.weather.com.cn/", "title": "天气网", "content": "### 营销中心\\n:   商务合作广告服务媒资合作\\n\\n### 相关链接\\n\\n中国气象局中国气象服务协会 中国天气频道\\n\\n客服邮箱：service@weather.com.cn客服电话：010-68409444京ICP证010385-2号\u3000京公网安备11041400134号\\n\\n中国天气网版权所有，未经书面授权禁止使用        Copyright©中国气象局公共气象服务中心 All Rights Reserved (2008-2026) [...] 2026年02月26日星期四  手机查天气 English\\n\\n国内) 本地) 国际)\\n\\n:   北京 上海 成都 杭州 南京 天津 深圳 重庆 西安 广州 青岛 武汉\\n\\n:   故宫 阳朔漓江 龙门石窟 野三坡 颐和园 九寨沟 东方明珠 凤凰古城 秦始皇陵 桃花源\\n\\n高球\\n:   佘山 春城湖畔 华彬庄园 观澜湖 依必朗 旭宝 博鳌 玉龙雪山 番禺南沙 东方明珠\\n\\n<<返回 全国\\n\\n河北下辖区域\\n\\n热门城市\\n\\n:   曼谷 东京 首尔 吉隆坡 新加坡 巴黎 罗马 伦敦 雅典 柏林 纽约 温哥华 墨西哥城 哈瓦那 圣何塞 巴西利亚 布宜诺斯艾利斯 圣地亚哥 利马 基多 悉尼 墨尔本 惠灵顿 奥克兰 苏瓦 开罗 内罗毕 开普敦 维多利亚 拉巴特\\n\\n:   亚洲 欧洲 北美洲 南美洲 非洲 大洋洲\\n\\n 预报\\n 预警\\n 天气地图\\n 台风路径\\n 雷达\\n 云图\\n 专业产品\\n 空间天气\\n\\n 资讯\\n 图片\\n 专题\\n 视频\\n\\n 节气\\n 环境\\n 旅游\\n 碳中和\\n\\n 气象科普\\n 一带一路\\n\\n 产创平台\\n 我的天空\\n\\n FY4B中国及周边区域真彩图\\n 北京明城墙遗址公园花开正当时\\n 贵州万峰林油菜花汇成金色海洋\\n 新疆白沙湖冰水交融 尽显空灵纯净\\n 全国24小时降水量预报\\n\\n12345\\n\\n雨和雪谁占“C位”？\\n\\n北方单日降温15℃\\n\\n## 两轮降水无缝衔接 华北东北气温偏低\\n\\n出行遇降温如何防护 春节返程上班调理指南\\n\\n雨多湿气重祛湿窍门 5招助你远离呼吸道病毒\\n\\n## 全国草木萌动地图 雨水时节春意显\\n\\n雨水润春归！一图带你寻觅中国最美油菜花海\\n\\n雨水春耕备耕祈雨求福 这些养生要点需了解\\n\\n## 东北雪深破纪录 未来三天我国降水频繁 [...] 雨水春耕备耕祈雨求福 这些养生要点需了解\\n\\n## 东北雪深破纪录 未来三天我国降水频繁\\n\\n 北京今天将现雨夹雪或降雪 夜间山区有小到中雪\\n 黑龙江今天降温剧烈 明天降雪再次增多寒意增强\\n 吉林大部将迎显著降温 东部南部持续多雪需防滑\\n 江西今天部分地区将有大到暴雨 明后天阴雨持续\\n 广东迎来新一轮降雨 明后天部分地区有大到暴雨\\n 福建雨持续 后天部分地区雨势较强气温明显下降\\n\\n更多>>\\n\\n天气预报\\n\\n>>\\n\\n# >>天气预报主持人\\n\\n宋英杰\\n\\n杨丹\\n\\n最新气象公告\\n\\n>>\\n\\n #### 02月26日：未来三天全国天气预报\\n\\n  中央气象台2026年02月26日18时发布未来三天全国天气预报。详细\\n #### 02月26日：未来十天全国天气预报\\n\\n  中央气象台2026年02月26日10时发布未来十天全国天气趋势预报。详细\\n #### 02月26日：全国主要公路气象预报\\n\\n  中国气象局与交通运输部2026年02月26日20时联合发布全国主要公路气象预报。详细\\n #### 02月26日：森林火险气象预报\\n\\n  中央气象台2026年02月26日18时发布森林火险气象预报。详细\\n #### 02月26日：流感气象风险预报\\n\\n  中国气象局公共气象服务中心2026年02月26日18时发布流感气象风险预报。详细\\n #### 02月26日：全国气候舒适度预报\\n\\n  中国气象局公共气象服务中心2026年02月26日08时发布全国气候舒适度预报。详细\\n\\n生活旅游\\n\\n>>\\n\\n ## 生活\\n\\n  # 雨水这样过：占稻色回娘家 充满无限希望\\n\\n  在进入雨水节气的这一天，我国很多地方的风......\\n\\n  详细\\n ## 生活\\n\\n  # 雨水时节话养生 护脾阳祛寒湿\\n\\n  雨水节气养生应以顺应春生、健脾祛湿、温补......\\n\\n  详细\\n ## 生活", "score": 0.42133808, "raw_content": null}, {"url": "https://www.weather.com.cn/weather/101010300.shtml", "title": "朝阳天气预报,朝阳7天天气预报,朝阳15天天气预报,朝阳天气查询", "content": "首页 预报 预警 雷达 云图 天气地图 专业产品 资讯 视频 节气 我的天空\\n\\n更多\\n\\n台风路径 空间天气 图片 专题 环境 旅游 碳中和 气象科普 一带一路 产创平台\\n\\n国内) 本地) 国际)\\n\\n:   北京 上海 成都 杭州 南京 天津 深圳 重庆 西安 广州 青岛 武汉\\n\\n:   故宫 阳朔漓江 龙门石窟 野三坡 颐和园 九寨沟 东方明珠 凤凰古城 秦始皇陵 桃花源\\n\\n高球\\n:   佘山 春城湖畔 华彬庄园 观澜湖 依必朗 旭宝 博鳌 玉龙雪山 番禺南沙 东方明珠\\n\\n<<返回 全国\\n\\n河北下辖区域\\n\\n热门城市\\n\\n:   曼谷 东京 首尔 吉隆坡 新加坡 巴黎 罗马 伦敦 雅典 柏林 纽约 温哥华 墨西哥城 哈瓦那 圣何塞 巴西利亚 布宜诺斯艾利斯 圣地亚哥 利马 基多 悉尼 墨尔本 惠灵顿 奥克兰 苏瓦 开罗 内罗毕 开普敦 维多利亚 拉巴特\\n\\n:   亚洲 欧洲 北美洲 南美洲 非洲 大洋洲\\n\\n全国> 北京 > 朝阳\\n\\n 今天\\n 7天\\n 8-15天\\n 40天\\n 雷达图\\n\\n # 24日（今天）\\n\\n  晴转多云\\n\\n  9/3℃\\n\\n  <3级\\n # 25日（明天）\\n\\n  多云转小雨\\n\\n  10/3℃\\n\\n  <3级\\n # 26日（后天）\\n\\n  雨夹雪转阴\\n\\n  6/1℃\\n\\n  <3级\\n # 27日（周五）\\n\\n  多云转阴\\n\\n  6/0℃\\n\\n  <3级\\n # 28日（周六）\\n\\n  阴\\n\\n  4/0℃\\n\\n  <3级\\n # 1日（周日）\\n\\n  多云转阴\\n\\n  5/0℃\\n\\n  <3级\\n # 2日（周一）\\n\\n  阴\\n\\n  6/1℃\\n\\n  <3级\\n\\n分时段预报 生活指数\\n\\n蓝天预报 \\n\\n### 蓝天预报综合天气现象、能见度、空气质量等因子，预测未来一周的天空状况。 [...] :   湖南今天降雨停歇 明晚起多地将再遭强降雨  中国天气网 2026-02-24 10:52\\n\\n:   今天江西阴雨持续气温下降 明天雨势增强  中国天气网 2026-02-24 10:44\\n\\n:   春染紫禁城！故宫墙外玉兰初绽 解锁京城第一抹春色  中国天气网 2026-02-24 10:31\\n\\n:   明后天湖北降雨再次增多 部分地区或现大雨  中国天气网 2026-02-24 09:57\\n\\n# 周边地区 | 周边景点 2026-02-24 11:30更新\\n\\n 香河\\n\\n  /\\n\\n  10/-2°C\\n 海淀\\n\\n  /\\n\\n  10/2°C\\n 永清\\n\\n  /\\n\\n  10/-3°C\\n 门头沟\\n\\n  /\\n\\n  8/3°C\\n 唐山\\n\\n  /\\n\\n  10/0°C\\n 天津\\n\\n  /\\n\\n  12/1°C\\n 大兴\\n\\n  /\\n\\n  9/2°C\\n 廊坊\\n\\n  /\\n\\n  10/-1°C\\n 石景山\\n\\n  /\\n\\n  9/1°C\\n 保定\\n\\n  /\\n\\n  10/-2°C\\n 霸州\\n\\n  /\\n\\n  10/-4°C\\n 通州\\n\\n  /\\n\\n  9/2°C\\n\\n# 周边地区 | 周边景点 2026-02-24 11:30更新\\n\\n 奥林匹克森林公园\\n\\n  /\\n\\n  9/0°C\\n 团结湖公园\\n\\n  /\\n\\n  9/2°C\\n 日坛公园\\n\\n  /\\n\\n  9/2°C\\n 国家体育场\\n\\n  /\\n\\n  9/1°C\\n 北京奥林匹克公园\\n\\n  /\\n\\n  9/1°C\\n 蟹岛绿色生态度假村\\n\\n  /\\n\\n  9/-2°C\\n 朝阳公园\\n\\n  /\\n\\n  9/0°C\\n 北京中华民族博物院\\n\\n  /\\n\\n  9/1°C\\n 北京欢乐谷\\n\\n  /\\n\\n  9/1°C\\n 中华民族园\\n\\n  /\\n\\n  9/1°C\\n 中国紫檀博物馆\\n\\n  /\\n\\n  9/0°C\\n\\n# 高清图集 [...] 查看更多>>\\n\\n# 雷达图\\n\\n# 联播天气预报\\n\\n# 更多>>高清图集\\n\\n 甘肃定西：雪后梯田 勾勒大地纹理\\n 河南郑州：雪落枝头 梅香自来\\n 青海湖蓝冰托落霞 金光漫染\\n 秋来栾树红 枝头挂满“胭脂果”\\n\\n# 天气视频\\n\\n正月初六 马踏穷尘 万事顺意\\n\\n正月初五 金马开库 破五迎财\\n\\n# >> 生活旅游\\n\\n 湖北神农架晨雾缭绕 秋色迷人\\n 换个视角看秋景 竟然这么美！\\n\\n### 景点推荐\\n\\n#### 景区天气气温 旅游指数\\n\\n 三亚 多云 29/20℃ 适宜\\n 九寨沟 多云 18/2℃ 适宜\\n 大理 晴转多云 21/4℃ 适宜\\n 张家界 多云转阴 15/6℃ 适宜\\n 桂林 小雨转多云 17/13℃ 适宜\\n 青岛 多云转晴 6/3℃ 一般\\n\\n全国降水量预报 强对流天气公报 全国地质灾害预报\\n\\n# 天气预报电话查询\\n\\n# 手机查询\\n\\n### 网站服务\\n:   关于我们联系我们用户反馈\\n\\n    版权声明网站律师\\n\\n### 营销中心\\n:   商务合作广告服务媒资合作\\n\\n### 相关链接\\n\\n中国气象局中国气象服务协会 中国天气频道\\n\\n客服邮箱：service@weather.com.cn客服电话：010-68409444京ICP证010385-2号\u3000京公网安备11041400134号\\n\\n中国天气网版权所有，未经书面授权禁止使用        Copyright©中国气象局公共气象服务中心 All Rights Reserved (2008-2026)", "score": 0.39375854, "raw_content": null}], "response_time": 1.44, "request_id": "6946fd2e-4777-4585-ac24-5b9978599354"}'}]
+| 工具 | 用途 | 依赖 |
+| --- | --- | --- |
+| `TavilySearch` | 实时网页搜索，返回标题、链接和摘要 | `langchain-tavily` |
+| `DuckDuckGoSearchRun` | 不需要密钥的网页搜索 | `langchain-community` + `duckduckgo_search` |
+| `WikipediaQueryRun` | 维基百科检索 | `langchain-community` + `wikipedia` |
+| `ArxivQueryRun` | arXiv 论文检索 | `langchain-community` + `arxiv` |
+| `RequestsGetTool` / `RequestsPostTool` | 指定域名内的 HTTP 请求 | `langchain-community` |
+| `ReadFileTool` / `WriteFileTool` / `DeleteFileTool` | 文件读写与删除 | `langchain-community` |
+| `ShellTool` | 执行 shell 命令，风险较高 | `langchain-community` |
 
-step: model
-content: [{'type': 'text', 'text': '根据搜索结果，我为您整理了北京接下来5天的天气预报：\n\n## 北京未来5天天气预报（2月28日-3月3日）\n\n### 1. 2月28日（周六）\n- **天气**：阴，西部、北部有雨夹雪\n- **气温**：最高4℃，最低-1℃\n- **风力**：东风2-3级\n- **特点**：体感阴冷，部分路面湿滑，注意防寒保暖和交通安全\n\n### 2. 3月1日（周日）\n- **天气**：阴转多云，夜间大部地区有雨夹雪或小雪\n- **气温**：最高5-6℃，最低0℃\n- **风力**：北转南风2-3级\n- **特点**：湿度较大，夜间开始有雨雪天气\n\n### 3. 3月2日（周一）\n- **天气**：阴，大部地区有雨夹雪或零星小雪\n- **气温**：最高5-6℃，最低-1℃\n- **风力**：北转南风2-3级\n- **特点**：雨雪天气持续，对早高峰交通有不利影响\n\n### 4. 3月3日（周二）\n- **天气**：多云\n- **气温**：最高7-10℃，最低-1℃\n- **风力**：北风<3级\n- **特点**：气温回升，元宵节白天比较适宜出行\n\n### 5. 3月4日（周三）\n- **天气**：多云\n- **气温**：最高6℃，最低0℃\n- **风力**：东北风<3级\n- **特点**：天气相对稳定\n\n## 重要提醒：\n1. **雨雪天气**：未来三天（2月28日-3月2日）北京多弱雨雪天气，特别是3月1日夜间到2日白天有较明显雨雪，需注意防范。\n2. **气温变化**：气温波动较大，最高气温在4-10℃之间，最低气温在-1到0℃之间。\n3. **出行建议**：雨雪天气导致路面湿滑，能见度下降，对交通有不利影响，驾车需减速慢行，保持车距。\n4. **穿衣建议**：天气阴冷，建议穿着厚外套、毛衣等保暖衣物，注意防寒保暖。\n\n建议您关注临近天气预报，根据天气变化适时调整出行计划和着装。'}]
+`langchain-community` 已进入 sunset 阶段，新项目优先选独立维护的集成包。表格里的工具名称用来认识生态，照搬前要确认维护状态和权限边界。
 
-```
+### 3.6 什么时候自己包装一层
 
-
-
-
-
-### 5.3.6.优化
-
-注意，LangChain提供的TavilySearch工具描述非常复杂，参数也很多。会有额外的网络消耗。如果我们仅仅是需要query参数，建议自定义工具。
-
-像这样：
+TavilySearch 功能全，也意味着参数多、说明长。如果你的 Agent 只需要一个搜索词，可以用第 1 章的方式二包一层：
 
 ```python
-# 使用tavily作为web搜索工具
-tavily = TavilySearch(
-    max_results=5,
-    topic="general"
-)
+tavily = TavilySearch(max_results=5, topic="general")
+
 
 @tool
-def web_search(query: str):
-    """Search the web for information"""
+def web_search(query: str) -> str:
+    """搜索网页，用于核实实时信息。
+
+    Args:
+        query: 搜索关键词
+    """
     return tavily.invoke(query)
 ```
 
+这样模型只看得到 `query` 一个参数，其他配置写死在函数里。第 4 部分的搜索工具走的是同一条路：把第三方 API 包成函数，用 docstring 告诉模型什么时候调用。原文还给过让回答附带来源链接的结构化输出写法，那属于输出格式的话题，这里不展开。
 
+## 4. 用 docstring 定义具体工具
 
-默认情况下AI回答的结果不包含信息来源，这样回答的可信度就不高。我们可以自定义结构化输出，让AI在回答时包含信息来源。
+下面五个工具都放在同一个脚本里，共用一个 `tools` 列表。它们分别对接 DeepSeek 搜索、DeepSeek OCR、文件读写删改和命令执行，写法都是 `@tool` 加 docstring。
+
+从零搭建项目时，把下面的代码保存到章节目录，文件名为 `05-custom-tools.py`。配套仓库已提供 [05-custom-tools.py](./05-custom-tools.py)。在项目根目录运行：
+
+```bash
+uv run "LangChain入门笔记/04-LangChain-Tool调用/05-custom-tools.py"
+```
 
 ```python
-from pydantic import BaseModel, Field
+import os
+import subprocess
+import tempfile
+from pathlib import Path
 
-# Agent回答内容引用的网页信息
-class Reference(BaseModel):
-    title: str = Field(description="The title of the web page cited in the answer")
-    url: str = Field(description="The url of the web page cited in the answer")
+import requests
+from dotenv import load_dotenv
+from langchain.agents import create_agent
+from langchain.chat_models import init_chat_model
+from langchain.messages import HumanMessage
+from langchain.tools import tool
+from langchain_core.tools import ToolException
+from pprint import pprint
 
-# Agent的回答内容
-class AnswerInfo (BaseModel):
-    answer: str = Field(description="The final answer for user")
-    reference: list[Reference] = Field(description="The web pages cited in the answer")
-    
-# 创建智能体，使用预定义工具tavily
-agent = create_agent(
-    model="deepseek-chat",
-    tools=[web_search],
-    system_prompt="你是一个智能助手，你使用工具来解决用户问题。",
-    response_format=AnswerInfo
-)
+load_dotenv()
 
-# 调用agent
-response = agent.invoke(
-    {"messages": [HumanMessage(content="蒸蚌是什么梗？")]},
-)
+WORKDIR = Path(tempfile.mkdtemp(prefix="langchain-tool-demo-"))
+PDF_PATH = Path("LangChain入门笔记/02-LangChain模型初始化/files/太平洋小蜜蜂6号综合意外险条款.pdf")
 
-# 获取结构化输出
-print(response['structured_response'])
-```
 
-结果如下：
+@tool
+def deepseek_web_search(query: str, count: int = 5) -> dict:
+    """用 DeepSeek 搜索网页，适合查询实时信息、核实时效性事实。
 
-```plain&#x20;text
-answer='"蒸蚌"是一个网络谐音梗，意思是"真棒"。\n\n**具体含义：**\n- "蒸蚌"是"真棒"的谐音，因为这两个词在普通话中发音相似（zhēn bàng）\n- 这是一种网络幽默用法，故意用"蒸蚌"这两个看起来不相关的字来代替"真棒"，制造一种有趣、搞笑的效果\n\n**使用场景：**\n1. 在社交媒体、聊天中用来表达赞美、鼓励\n2. 常用于宠物视频中，比如抖音上流行的"萝卜纸巾挑战"中，当宠物选对时主人会喊"蒸蚌！"\n3. 作为一种网络幽默表达方式，增加趣味性\n\n**来源和流行：**\n这个梗最初可能源于网络聊天中的谐音创造，后来在抖音等短视频平台上因为"萝卜纸巾挑战"而流行起来。在这个挑战中，宠物需要在胡萝卜和纸巾之间做出选择，选对了就会得到主人"蒸蚌！"的夸奖。\n\n**类似梗：**\n类似的谐音梗还有"蒸虾"（真瞎）、"蚌埠住了"（绷不住了）等，都是利用汉字谐音创造幽默效果的网络用语。' 
+    Args:
+        query: 搜索关键词，支持 site: 等搜索语法
+        count: 返回的结果条数，最多 50 条
+    """
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise ToolException("请先在 .env 中配置 DEEPSEEK_API_KEY。")
 
-reference=[
-Reference(title='"我蒸蚌"是什么意思？ - HiNative', url='https://zh.hinative.com/questions/15904858'),
+    try:
+        response = requests.post(
+            "https://api.deepseek.com/v1/tools/search",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"query": query, "count": count, "need_content": False},
+            timeout=60,
+        )
+        response.raise_for_status()
+        results = response.json()["results"]
+    except (requests.RequestException, ValueError, KeyError) as exc:
+        raise ToolException(f"搜索失败：{exc}") from exc
 
-Reference(title='萝卜纸巾分不清的"蒸蚌小猫"，拿下首个全球代言！ - 新浪财经', url='https://cj.sina.com.cn/articles/view/5952915705/162d248f906702n1fe?froms=ggmp'), 
+    return {
+        "results": [
+            {
+                "title": item["title"],
+                "url": item["url"],
+                "summary": item["summary"],
+                "date": item["date"],
+            }
+            for item in results
+        ]
+    }
 
-Reference(title='蒸蚌什么梗 - 抖音', url='https://www.douyin.com/search/%E8%92%B8%E8%9A%8C%E4%BB%80%E4%B9%88%E6%A2%97')
+
+@tool
+def deepseek_ocr(file_path: str, purpose: str = "text_recognition") -> dict:
+    """识别 PDF、Word、PPT 或图片中的文字，按页返回结果。
+
+    Args:
+        file_path: 要识别的文件路径，相对项目根目录
+        purpose: text_recognition 或 rich_layout_recognition
+    """
+    api_key = os.getenv("DEEPSEEK_API_KEY")
+    if not api_key:
+        raise ToolException("请先在 .env 中配置 DEEPSEEK_API_KEY。")
+
+    path = Path(file_path)
+    if not path.is_file():
+        raise ToolException(f"文件不存在：{file_path}")
+
+    try:
+        with path.open("rb") as file_obj:
+            response = requests.post(
+                "https://api.deepseek.com/v1/tools/ocr",
+                headers={"Authorization": f"Bearer {api_key}"},
+                files={"file": (path.name, file_obj)},
+                data={"purpose": purpose},
+                timeout=180,
+            )
+        response.raise_for_status()
+        result = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise ToolException(f"OCR 请求失败：{exc}") from exc
+
+    if "error" in result:
+        raise ToolException(f"OCR 识别失败：{result['error']}")
+
+    return {
+        "page_count": result["page_count"],
+        "pages": [
+            {
+                "index": page["index"],
+                "text": page["text"][:500],
+                "finish_reason": page["finish_reason"],
+            }
+            for page in result["pages"]
+        ],
+    }
+
+
+@tool
+def read_file(path: str) -> str:
+    """读取临时工作目录中的文本文件。
+
+    Args:
+        path: 文件名，例如 note.txt
+    """
+    return (WORKDIR / path).read_text(encoding="utf-8")
+
+
+@tool
+def write_file(path: str, content: str) -> str:
+    """把文本写入临时工作目录，文件不存在时创建。
+
+    Args:
+        path: 文件名，例如 note.txt
+        content: 要写入的文本
+    """
+    target = WORKDIR / path
+    target.write_text(content, encoding="utf-8")
+    return f"已写入 {path}"
+
+
+@tool
+def edit_file(path: str, old: str, new: str) -> str:
+    """把文件里的一段文本替换成另一段文本。
+
+    Args:
+        path: 文件名
+        old: 原文本
+        new: 新文本
+    """
+    target = WORKDIR / path
+    text = target.read_text(encoding="utf-8")
+    target.write_text(text.replace(old, new), encoding="utf-8")
+    return f"已修改 {path}"
+
+
+@tool
+def delete_file(path: str) -> str:
+    """删除临时工作目录中的文件。
+
+    Args:
+        path: 文件名
+    """
+    (WORKDIR / path).unlink()
+    return f"已删除 {path}"
+
+
+@tool
+def run_command(command: list[str]) -> dict:
+    """在临时工作目录里执行一条命令，返回退出码和输出。
+
+    Args:
+        command: 命令及参数组成的列表，例如 ["echo", "hello"]
+    """
+    completed = subprocess.run(
+        command,
+        cwd=WORKDIR,
+        capture_output=True,
+        text=True,
+        timeout=10,
+        shell=False,
+    )
+    return {
+        "returncode": completed.returncode,
+        "stdout": completed.stdout[:4000],
+        "stderr": completed.stderr[:4000],
+    }
+
+
+tools = [
+    deepseek_web_search,
+    deepseek_ocr,
+    read_file,
+    write_file,
+    edit_file,
+    delete_file,
+    run_command,
 ]
+for tool_obj in tools:
+    tool_obj.handle_tool_error = True
+
+
+print("搜索结果：")
+pprint(deepseek_web_search.invoke({"query": "DeepSeek API 文档 site:api-docs.deepseek.com", "count": 3}))
+
+print("OCR 结果：")
+pprint(deepseek_ocr.invoke({"file_path": str(PDF_PATH)}))
+
+print("文件工具：")
+print(write_file.invoke({"path": "note.txt", "content": "你好，LangChain"}))
+print(read_file.invoke({"path": "note.txt"}))
+print(edit_file.invoke({"path": "note.txt", "old": "LangChain", "new": "Tool"}))
+print(read_file.invoke({"path": "note.txt"}))
+print(delete_file.invoke({"path": "note.txt"}))
+
+print("命令执行：")
+pprint(run_command.invoke({"command": ["echo", "hello"]}))
+
+model = init_chat_model(
+    model="deepseek-flash",
+    extra_body={"thinking": {"type": "disabled"}},
+)
+agent = create_agent(
+    model=model,
+    tools=tools,
+    system_prompt="需要使用工具时直接调用，完成后用中文简要说明结果。",
+)
+response = agent.invoke({
+    "messages": [HumanMessage("在临时目录里写一个 hello.txt，内容写‘你好’，然后读出来。")]
+})
+print("Agent 回复：", response["messages"][-1].content)
 ```
 
+脚本里有个重复动作：每个工具都可能抛 `ToolException`，最后统一设 `handle_tool_error = True`。这样出错时，错误文本会作为一条工具消息回到 Agent，模型可以据此说明失败原因，而不是让整次运行崩掉。
+
+### 4.1 DeepSeek 网页搜索工具
+
+搜索工具对接 `POST https://api.deepseek.com/v1/tools/search`，请求体里 `query` 是搜索词，`count` 控制条数，`need_content=False` 表示不要网页正文。docstring 交代了适用场景，参数只用普通类型注解，第 1 篇讲过的 `Annotated` 还能用来加约束，这里从简。返回值里只留 `title`、`url`、`summary` 和 `date` 四项，够模型写带来源的回答。
+
+配套 notebook 用的写法是 `@tool(args_schema=DeepSeekSearchInput)`，那是第 1 章的方式三。改成方式二之后，工具名和用途来自函数与 docstring，参数约束不再由 BaseModel 提供。两种写法都能跑通，差别只在说明信息怎么组织。 [DeepSeek 网页搜索 API](https://api-docs.deepseek.com/zh-cn/api/search.md)
+
+### 4.2 DeepSeek OCR 工具
+
+OCR 工具对接 `POST https://api.deepseek.com/v1/tools/ocr`，请求是 `multipart/form-data`：一个带文件名的 `file`，一个 `purpose`。`purpose` 取 `text_recognition` 或 `rich_layout_recognition`，前者对不含图片的 Word、PPT 直接提取文字，后者对所有文件逐页识别。
+
+示例文件用的是第 2 篇的 PDF，路径相对项目根目录。返回按页组织，`page_count` 是页数，`pages[].text` 是识别文本。`finish_reason` 为 `length` 时说明该页输出被截断，代码里把每页文本截到 500 字只是为了打印时不刷屏。HTTP 200 也可能在响应体里带 `error`，所以代码额外检查了一次。
+
+第 2 篇的 Files API 也用过 `purpose="text_recognition"`，那是把文件交给模型、随后围绕文档问答的路子。这里是直接调用 OCR 端点拿识别文本，两者不要混在一起。 [DeepSeek OCR API](https://api-docs.deepseek.com/zh-cn/api/ocr) · [OCR 指南](https://api-docs.deepseek.com/zh-cn/guides/ocr)
+
+### 4.3 文件读取、写入、修改与删除工具
+
+四个工具共用脚本开头创建的临时目录 `WORKDIR`，参数里只写文件名。`write_file` 负责新建或覆盖，`read_file` 读回内容，`edit_file` 做整段字符串替换，`delete_file` 删除文件。演示按写、读、改、读、删的顺序跑一遍，每一步都会把返回值打印出来。
+
+这一段重点看工具定义的写法：docstring 第一句告诉模型这个工具能干什么，`Args:` 逐项说明参数，函数体只做最简单的事。真正的工程实现还要考虑路径校验、权限和备份，这里不展开；记住教学示例里的文件操作只在临时目录里做，别把路径换成真实目录。
+
+### 4.4 命令执行工具
+
+`run_command` 接收的是命令及参数组成的列表，不是一整条字符串。脚本里用 `subprocess.run` 的 `shell=False` 形式执行，把工作目录锁在临时目录，并给输出设了长度上限。演示只跑 `echo`，重点仍然是工具说明怎么写：docstring 里给出参数形式和一个具体例子，模型就知道该传什么。
+
+命令执行比文件操作风险更高，真实项目里要考虑超时、权限和环境隔离。这里只保留最小实现，用来说明"把本地能力包成工具"这件事本身。
+
+### 4.5 接进 Agent 看一次完整流程
+
+脚本最后把七个工具一起交给 `create_agent`，提了一个"写文件再读出来"的要求。模型先决定用哪个工具、填什么参数，LangChain 执行函数并把结果回填，模型再根据结果决定下一步。这条链路在第 1 篇已经拆开讲过，这里只是换成一组更接近真实用途的工具。
+
+如果某一步出错了，`handle_tool_error` 会让错误文本流回 Agent，终端里能看到模型如何解释失败，而不是只看到一条异常堆栈。
+
+## 5. 小结
+
+1. 三种写法的差别在于工具三要素从哪里来：装饰器属性可以覆盖名称和用途，docstring 提供默认用途与参数说明，`args_schema` 提供字段级约束。
+2. docstring 是默认推荐写法，说明和实现待在一起；参数有枚举或范围时，配合类型注解或改用 `args_schema`。
+3. 预定义工具省去自己封装的功夫，TavilySearch 适合实时搜索；参数太多时，可以用 `@tool` 包一层只暴露需要的参数。
+4. 把第三方 API 包成工具时，docstring 写清楚"什么时候用"，异常转成 `ToolException`，错误才能作为消息回到 Agent。
+5. 文件和命令类工具在本文只是最小实现，只用于讲清定义方式；真实环境需要自己做隔离与权限控制。
+
+下一篇转到 MCP：外部工具还可以按标准协议接进来。[LangChain 的 MCP 调用](../05-LangChain-MCP调用/LangChain-MCP调用.md)
