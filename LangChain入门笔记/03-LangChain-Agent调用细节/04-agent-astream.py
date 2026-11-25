@@ -15,7 +15,7 @@ tools = []
 agent = create_agent(model=model, tools=tools)
 
 
-async def main():
+async def print_text_chunks():
     async for chunk in agent.astream(
         {"messages": [HumanMessage("你是谁？")]},
         stream_mode="messages",
@@ -25,5 +25,4 @@ async def main():
         print(token.text, end="", flush=True)
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(print_text_chunks())

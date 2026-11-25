@@ -15,7 +15,7 @@ tools = []
 agent = create_agent(model=model, tools=tools)
 
 
-async def main():
+async def print_message_text():
     stream = await agent.astream_events(
         {"messages": [HumanMessage("你是谁？")]},
         version="v3",
@@ -25,5 +25,4 @@ async def main():
             print(text, end="", flush=True)
 
 
-if __name__ == "__main__":
-    asyncio.run(main())
+asyncio.run(print_message_text())

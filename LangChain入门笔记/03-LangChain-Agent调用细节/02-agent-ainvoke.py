@@ -14,13 +14,6 @@ model = init_chat_model(
 tools = []
 agent = create_agent(model=model, tools=tools)
 
-
-async def main():
-    response = await agent.ainvoke({
-        "messages": [HumanMessage("你是谁？")]
-    })
-    print(response["messages"][-1].content)
-
-
-if __name__ == "__main__":
-    asyncio.run(main())
+messages = [HumanMessage("你是谁？")]
+response = asyncio.run(agent.ainvoke({"messages": messages}))
+print(response["messages"][-1].content)

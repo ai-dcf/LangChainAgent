@@ -110,17 +110,19 @@ print(response.choices[0].message.content)
 
 ## 1.4 Agent 是什么：模型、工具与循环
 
+如果程序收到请求后总要读一次时钟，按固定流程读取时间，再交给模型组织措辞就够了。当同一个入口要回答不同问题，需要根据问题判断是否查时间、调用哪个工具或要不要继续查，才适合把这部分判断交给 Agent。模型每多做一次判断，就可能多一次请求，流程的耗时和结果也会有波动。
+
 任务需要读时钟、查数据库或调接口时，应用可以把这些操作注册成工具。模型根据当前上下文请求动作，程序执行并回传结果，模型再决定下一步。围绕模型组织工具和执行循环，就构成了本篇要实现的 Agent。
 
 这套结构有三块：
 
 1. **模型负责判断。** 它读当前上下文，判断这一轮该直接回答，还是请求某个工具。模型依然是 LLM，能力边界没有变，变的是它多了一个“可以请求动作”的选项。
 2. **工具负责执行。** 工具把外部能力（读时钟、查库、发请求）包装成模型可以请求的接口，附带名称、用途和参数说明。模型发出工具请求，真正的执行由程序完成。
-3. **循环与状态负责驱动。** 程序执行工具、回填结果、再次调用模型，直到模型不再请求工具。本例用 `messages` 保存运行中的对话历史，并把它与工具说明一起提供给下一次模型调用。这里的“上下文”指模型当前可用的信息。LangChain 进阶篇还会介绍单独注入的 Runtime Context。
+3. **循环与状态负责驱动。** 程序执行工具、回填结果、再次调用模型，直到模型不再请求工具。本例用 `messages` 保存运行中的对话历史，并把它与工具说明一起提供给下一次模型调用。
 
 把三块串起来，一次运行大概是这样：用户问题进入消息列表 → 模型读到工具说明，输出一条工具请求 → 程序按请求找到并执行工具，拿到结果 → 程序把结果作为新消息追加进列表，并标明它对应哪次请求 → 模型看到更新后的历史，再决定是继续请求工具，还是给出最终回答 → 直到某一轮没有工具请求为止。每一轮模型读到的，都是更新后的同一份上下文，工具结果正是靠回填进这里才被模型"看见"。这就是 ReAct 论文里"推理—行动—观察"交替的思路：模型不是一口气给出答案，而是看到结果后再决定下一步。
 
-它适合需要运行时事实、多步操作、按情况走不同路径的任务。流程固定的任务不必用它——直接写程序更短也更可控；对延迟和确定性要求高的场景也要谨慎，模型决策本身带不确定性。另外还多出三类失败点：工具没注册、参数解析失败、循环不收敛。用了 Agent，就等于把模型的不确定性从“答案怎么措辞”扩展到了“下一步走哪条路”。
+工具没注册、参数校验失败、循环不收敛，都可能让这条链路中断。下面的手写版会把这些步骤摊开，方便看清问题发生在哪一环。
 
 ![什么是 Agent？模型可以直接回答，也可以请求工具。程序按名称和参数执行工具，用 tool_call_id 关联请求，把结果写回 messages，再交给模型判断。](./images/what-is-an-agent-handdrawn.png)
 
@@ -230,8 +232,6 @@ print(f"最终回答：{run_agent('今天是几月几号')}")
 
 别把它理解成两种对立方案：Agent 里干决策的还是那个 LLM，只是外面加了工具与循环。
 
-到这里第二遍的取舍也就清楚了：如果程序只做一件事——收到问题就先读时钟，再把日期交给模型组织措辞——按固定流程写就够了，根本不必引入 Agent。Agent 的价值出现在同一个入口要回答多种问题的时候：“这次要不要查时间”不再由程序员预先写死，而成了模型根据用户问题做的判断。上一节那段手写代码，干的就是这件事。
-
 ## 1.6 LangChain：把重复劳动交给框架
 
 ### 1.6.1 框架定位
@@ -293,6 +293,27 @@ for message in response["messages"]:
 
 如果模型调用一次时钟工具再作答，输出里会看到四条消息。`HumanMessage` 是提问，第一条 `AIMessage` 是工具请求，`ToolMessage` 记录本地时间，最后一条 `AIMessage` 给出回答。如果模型直接回答，输出里就只有提问和回答。
 
+工具交给模型时，docstring 会成为工具的用途说明。上面的“获取当前时间”足够演示调用。同一个工具如果能查两个时区，说明可以写清什么时候该用它，还可以用参数描述和 `Literal` 告诉模型该传什么值。
+
+```python
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Literal
+
+from langchain.tools import tool
+from pydantic import Field
+
+
+@tool
+def current_time(
+    zone: Annotated[Literal["UTC", "UTC+8"], Field(description="要查询的时区")],
+) -> str:
+    """回答当前日期或时间时，查询指定时区的时钟。"""
+    offset = timedelta(hours=8 if zone == "UTC+8" else 0)
+    return datetime.now(timezone(offset)).isoformat(timespec="seconds")
+```
+
+模型看到的 `zone` 有两个可选值。`system_prompt` 则可以给整个 Agent 定一条规则，例如“回答当前日期前，先查时钟”。工具说明帮助模型选工具和填参数，系统提示词给出整个任务的行为要求。 [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)
+
 | 手写 Agent 要处理的工作 | LangChain 如何处理 |
 | --- | --- |
 | 配置 DeepSeek 请求并读取模型响应 | `init_chat_model()` 接入 DeepSeek，模型集成读取 `DEEPSEEK_API_KEY` 并把响应转换成标准消息 |
@@ -302,7 +323,39 @@ for message in response["messages"]:
 
 调用时只要给模型、工具函数和用户消息，完整流程就跑起来了。想调试，直接看 `response["messages"]`：模型有没有请求工具、工具返回了什么，都在里面。 [LangChain Agents 文档](https://docs.langchain.com/oss/python/langchain/agents) · [DeepSeek 模型集成](https://docs.langchain.com/oss/python/integrations/chat/deepseek)
 
-### 1.6.3 生态工具的分工
+### 1.6.3 工具如何拿到运行时信息
+
+假设工具要知道当前用户是谁。应用可以用 `context_schema` 声明要传的字段，在调用 Agent 时通过 `context` 提供值，工具用 `ToolRuntime` 取到它。把下面的代码接在 1.6.2 的完整 `03-agent-call.py` 示例末尾一起运行，它会复用前面初始化好的 `model`。
+
+```python
+from dataclasses import dataclass
+
+from langchain.agents import create_agent
+from langchain.tools import ToolRuntime, tool
+
+
+@dataclass
+class UserContext:
+    user_id: str
+
+
+@tool
+def current_user(runtime: ToolRuntime[UserContext]) -> str:
+    """查询当前用户的编号。"""
+    return runtime.context.user_id
+
+
+agent = create_agent(model=model, tools=[current_user], context_schema=UserContext)
+result = agent.invoke(
+    {"messages": [{"role": "user", "content": "请调用工具查询我的用户编号。"}]},
+    context=UserContext(user_id="student-01"),
+)
+print(result["messages"][-1].text)
+```
+
+工具调用成功时，工具返回 `student-01`，模型可以用这个结果回答。`messages` 记录提问、回答和工具结果。`context` 由应用为本次运行提供，`runtime` 参数由框架注入，模型发出工具请求时无需填写它。这个例子里，用户编号在工具返回后才进入消息历史。 [LangChain Tools](https://docs.langchain.com/oss/python/langchain/tools)
+
+### 1.6.4 生态工具的分工
 
 LangChain 的 `create_agent()` 和 Deep Agents 都运行在 LangGraph 上。LangSmith 可以跨框架追踪和评估运行结果。
 
@@ -319,7 +372,19 @@ LangChain 的 `create_agent()` 和 Deep Agents 都运行在 LangGraph 上。Lang
 
 四者不是层层替代，而是互补：日常循环用 LangChain，要显式控制流程换 LangGraph，长任务看 Deep Agents，调试和监控交给 LangSmith。产品分工可参阅 [LangGraph 官方概览](https://docs.langchain.com/oss/python/langgraph/overview)。
 
-三段验证代码都放在 1.2 搭好的项目里，用 `uv run` 就能直接跑。
+三个主示例都放在 1.2 搭好的项目里，用 `uv run` 就能直接跑。
+
+### 1.6.5 循环出问题时从哪里查
+
+手写版的 `for _ in range(5)` 给循环设了上限。换成 `create_agent` 后，可以用中间件给模型调用或工具调用设上限，也可以在出错时重试，或者把错误交回模型处理。
+
+| 遇到的情况 | 从哪里查或怎么处理 |
+| --- | --- |
+| 工具找不到或参数不合法 | 先核对 `tools` 列表和参数 schema。工具执行抛出的异常可用 `ToolErrorMiddleware` 转成错误消息，让模型看到问题。 |
+| 模型或工具遇到暂时性的超时、限流 | 分别用 `ModelRetryMiddleware` 或 `ToolRetryMiddleware` 做有限重试。 |
+| 模型反复请求工具 | 用 `ModelCallLimitMiddleware` 限制模型调用次数，或用 `ToolCallLimitMiddleware` 限制工具调用次数。 |
+
+[LangChain 内置中间件](https://docs.langchain.com/oss/python/langchain/middleware/built-in)
 
 ## 1.7 小结
 
@@ -327,8 +392,8 @@ LangChain 的 `create_agent()` 和 Deep Agents 都运行在 LangGraph 上。Lang
 
 1. LLM 的训练知识有时效，外部资源访问需要宿主提供能力，多轮对话由应用或服务接续历史。日期实验展示了如何为模型提供可追溯的实时信息。
 2. Agent 没换模型，只是在外面加了一层结构：判断交给模型，外部能力交给工具，循环和状态把两者接起来。
-3. 多步运行靠的是“推理—行动—观察”的交替，消息列表就是这条链路的状态载体。
-4. 不是所有任务都需要 Agent。流程固定就写程序，用了 Agent 还要多担工具、参数、循环三类失败。
+3. 消息列表记录“推理—行动—观察”过程中交换的信息，Runtime Context 把调用方提供的值传给工具。
+4. 流程固定时可以直接写程序。引入 Agent 后，先从工具注册与参数定义查找问题，需要时用中间件重试或限制调用次数。
 5. LangChain 把模型接入、工具声明、循环组装、消息管理收成四个组件，省样板代码，不换模型能力；再往复杂走，LangGraph 管显式编排，Deep Agents 管长任务，LangSmith 管追踪评估。
 
 循环框架接好了，模型本身仍然是可以单独配置和调用的组件。下一篇从模型初始化接口讲起：[如何初始化和配置 LangChain 模型](../02-LangChain模型初始化/LangChain模型初始化.md)。

@@ -6,16 +6,16 @@
 
 ### 1.1 初始化需要哪些信息
 
-LangChain中可以使用 `init_chat_model` 初始化聊天模型。
+可以用 `init_chat_model` 初始化聊天模型。下面是它的接口签名。
 
-```python
+```text
 init_chat_model(
   model: str | None = None,
   *,
   model_provider: str | None = None,
   configurable_fields: Literal['any'] | list[str] | tuple[str, ...] | None = None,
   config_prefix: str | None = None,
-  kwargs: Any = {}
+  **kwargs: Any,
 ) -> BaseChatModel | _ConfigurableModel
 ```
 
@@ -36,7 +36,7 @@ init_chat_model(
 | `init_chat_model(model=..., model_provider=..., base_url=..., api_key=...)` | 需要显式选择集成，并配置自定义端点和密钥 |
 | `ChatOllama(model=...)` | 已经知道要用哪个集成，可以直接创建它提供的模型类 |
 
-![DeepSeek、百炼千问和 Ollama 的初始化写法、模型类与服务](./images/langchain-model-initialization-v2.png)
+![DeepSeek 只传模型名，百炼千问指定服务商、地址和密钥，Ollama 直接实例化。三种写法分别得到 ChatDeepSeek、ChatOpenAI 和 ChatOllama。](./images/langchain-model-initialization-handdrawn.png)
 
 DeepSeek 可以用第一种写法，是因为 LangChain 识别 `deepseek` 前缀。
 
@@ -55,7 +55,7 @@ uv init
 uv add langchain python-dotenv
 ```
 
-按下面各节安装对应的模型集成。如果使用云端模型，把密钥写入项目根目录的 `.env`。每段 Python 示例都可以单独保存为 `main.py`，再从项目根目录运行 `uv run main.py`。
+按下面各节安装对应的模型集成。如果使用云端模型，把密钥写入项目根目录的 `.env`。本节的三个初始化示例可以分别保存为独立的 Python 文件。例如保存成项目根目录下的 `model_demo.py`，再运行 `uv run model_demo.py`。
 
 #### 1.2.1 只传模型名初始化 DeepSeek
 
@@ -123,28 +123,18 @@ uv add langchain-ollama
 ollama pull qwen3.5:0.8b
 ```
 
-用 `ChatOllama` 初始化刚下载的模型，再沿用第 1 篇的 `create_agent` 发一次提问。连接默认的本地 Ollama 服务通常无需 API Key。
+用 `ChatOllama` 初始化刚下载的模型。连接默认的本地 Ollama 服务通常无需 API Key。
 
 ```python
-from langchain.agents import create_agent
 from langchain_ollama import ChatOllama
 
-# 初始化 Ollama 上的本地模型
 model = ChatOllama(
     model="qwen3.5:0.8b",
     temperature=1.0,
 )
-
-# 创建 Agent 并发送一条用户消息
-agent = create_agent(model=model, tools=[])
-
-response = agent.invoke({
-    "messages": [{"role": "user", "content": "你是谁？"}]
-})
-print(response)
 ```
 
-运行后，返回结果的 `messages` 里会包含这次提问和模型回复。想换成其他已经下载的聊天模型，把 `model` 改成对应的标签即可。
+想换成其他已经下载的聊天模型，把 `model` 改成对应的标签即可。初始化只会创建模型对象，在 2.2.1 可以发一条消息验证连接。
 
 ## 2. LangChain 的几种消息类型
 
@@ -161,7 +151,7 @@ print(response)
 | `SystemMessage` | `system` | 给模型提供角色、语气或任务要求 |
 | `ToolMessage` | `tool` | 把工具执行的结果传回模型 |
 
-![字符串与消息列表的输入输出，以及工具结果回传流程](./images/langchain-message-flow-v2.png)
+![字符串包装成 HumanMessage，消息列表按顺序传入。两种输入调用模型后都得到 AIMessage。工具结果通过 ToolMessage 交回模型。](./images/langchain-message-flow-handdrawn.png)
 
 普通问答通常只涉及 `HumanMessage` 和 `AIMessage`。
 
@@ -195,6 +185,8 @@ print(response.text)
 
 如果想查看完整的 `AIMessage`，也可以直接打印 `response`。这里通过 `extra_body` 关闭思考模式。 [DeepSeek 思考模式文档](https://api-docs.deepseek.com/guides/thinking_mode/)
 
+用 1.2.3 初始化的 Ollama 模型时，调用方式相同。`model.invoke("你是谁？")` 也返回一条 `AIMessage`，可以用 `response.text` 读取文本。完整示例见 [03-ollama-model.py](./03-ollama-model.py)。
+
 #### 2.2.2 传入带角色的消息列表
 
 保留同一个问题，在前面加一条 `SystemMessage`，让模型以天文馆讲解员的身份回答。
@@ -218,7 +210,31 @@ response = deepseek_model.invoke(messages)
 response.pretty_print()
 ```
 
-`response.pretty_print()` 会打印模型返回的消息。要继续多轮问答，可以把这条回复和下一条用户提问按顺序追加到 `messages`，再调用一次模型。
+`response.pretty_print()` 会打印模型返回的消息。直接调用聊天模型时，应用可以把这条回复和下一条用户提问按顺序追加到 `messages`，再把整份列表交给模型。
+
+### 2.3 多轮对话的历史由谁保存
+
+用 `create_agent` 时，可以用 `checkpointer` 保存每个会话的 Agent 状态，其中包括消息历史。把下面的代码接在 2.2.2 的完整示例末尾一起运行，复用已初始化的 `deepseek_model`。两次调用用同一个 `thread_id` 标识同一场对话。
+
+```python
+from langchain.agents import create_agent
+from langgraph.checkpoint.memory import InMemorySaver
+
+agent = create_agent(model=deepseek_model, tools=[], checkpointer=InMemorySaver())
+config = {"configurable": {"thread_id": "astronomy-1"}}
+
+agent.invoke(
+    {"messages": [{"role": "user", "content": "我最喜欢的行星是土星。"}]},
+    config=config,
+)
+result = agent.invoke(
+    {"messages": [{"role": "user", "content": "我刚才说最喜欢哪颗行星？"}]},
+    config=config,
+)
+print(result["messages"][-1].text)
+```
+
+第二次调用只传了新问题。Agent 从同一个线程恢复历史，所以模型可以根据上一轮回答“土星”。换一个 `thread_id` 就是另一场对话。这里的 `InMemorySaver` 只在当前进程里保存状态。创建 Agent 时省略 `checkpointer`，后续调用需要由应用提供所需历史。跨会话共享的长期记忆可以通过 `store` 提供。 [LangChain 短期记忆](https://docs.langchain.com/oss/python/langchain/short-term-memory)
 
 ## 3. 消息字段与多模态调用
 
@@ -254,7 +270,7 @@ human_message = HumanMessage(content=question)
 | `status` | `ToolMessage` | 标记工具执行结果是 `success` 还是 `error` |
 | `artifact` | `ToolMessage` | 保存供应用使用的附加数据，例如检索结果的文档 ID。`content` 则承载要交给模型的工具结果 |
 
-接着用第 2.2.2 节返回的 `response` 读取月相回答。纯文本回复的 `.text` 和 `.content` 通常会显示同一段文字，`.content_blocks` 则会把它表示为一个 `type` 为 `text` 的内容块。需要统计 token 时，再读取 `usage_metadata`。
+把下面的代码接在 2.2.2 的完整示例末尾，用那里的 `response` 读取月相回答。纯文本回复的 `.text` 和 `.content` 通常会显示同一段文字，`.content_blocks` 则会把它表示为一个 `type` 为 `text` 的内容块。需要统计 token 时，再读取 `usage_metadata`。
 
 ```python
 print(response.text)               # 显示回答文字
@@ -277,9 +293,9 @@ print(response.usage_metadata)     # 查看 token 用量
 | 音频 | `audio` | Base64、文件 ID |
 | 视频 | `video` | Base64、文件 ID |
 
-按第 1 部分的方法初始化聊天模型，并将它赋给 `model`。选型时确认模型和接入方式支持你要传的媒体类型、传入方式和文件大小。URL 要换成模型服务可以访问的文件地址，`file_id` 要换成对应服务商上传文件后返回的 ID。部分接口还要求为 PDF 提供文件名。 [LangChain 多模态输入文档](https://docs.langchain.com/oss/python/langchain/messages#multimodal)
+可以先跑 3.2.1 的本地图片示例，从模型初始化一路看到回答。其余代码块演示不同的消息写法，需要先初始化一个支持所选媒体类型和传入方式的 `model`。URL 要换成模型服务能访问的地址，`file_id` 要换成对应服务商返回的文件 ID。部分接口还要求为 PDF 提供文件名。 [LangChain 多模态输入文档](https://docs.langchain.com/oss/python/langchain/messages#multimodal)
 
-下面每个小例子可以选一个运行。使用 Base64 时，先把这个函数放在示例前面，再把文件路径换成自己的路径。`mime_type` 要与文件实际格式一致。
+运行后面的 PDF、音频或视频 Base64 片段时，先把下面的函数放在片段前，再把路径换成自己的文件。`mime_type` 要与文件实际格式一致。
 
 ```python
 from base64 import b64encode
@@ -292,6 +308,40 @@ def file_to_base64(path: str) -> str:
 
 #### 3.2.1 图片
 
+**通过 Base64 传入本地 PNG 图片**
+
+这个例子直接读取本章的模型初始化示意图。沿用 1.2.1 的依赖和 `DEEPSEEK_API_KEY`，把代码保存为项目根目录下的 `image_demo.py`，运行 `uv run image_demo.py`。如果只下载了文章，可以把 `image_path` 改成自己的 PNG 文件路径。 [DeepSeek 图像理解](https://api-docs.deepseek.com/zh-cn/guides/vision/)
+
+```python
+from base64 import b64encode
+from pathlib import Path
+
+from dotenv import load_dotenv
+from langchain.chat_models import init_chat_model
+
+load_dotenv()
+model = init_chat_model(
+    model="deepseek-flash",
+    extra_body={"thinking": {"type": "disabled"}},
+)
+
+image_path = (
+    Path("LangChain入门笔记/02-LangChain模型初始化/images")
+    / "langchain-model-initialization-handdrawn.png"
+)
+image_base64 = b64encode(image_path.read_bytes()).decode("ascii")
+
+message = {
+    "role": "user",
+    "content": [
+        {"type": "text", "text": "这张图展示了哪些模型初始化方式？"},
+        {"type": "image", "base64": image_base64, "mime_type": "image/png"},
+    ],
+}
+response = model.invoke([message])
+print(response.text)
+```
+
 **通过 URL 传入图片**
 
 ```python
@@ -300,20 +350,6 @@ message = {
     "content": [
         {"type": "text", "text": "这张照片里能看到月亮吗？"},
         {"type": "image", "url": "https://example.com/moon.jpg"},
-    ],
-}
-response = model.invoke([message])
-print(response.text)
-```
-
-**通过 Base64 传入本地 JPEG 图片**
-
-```python
-message = {
-    "role": "user",
-    "content": [
-        {"type": "text", "text": "这张照片里能看到月亮吗？"},
-        {"type": "image", "base64": file_to_base64("moon.jpg"), "mime_type": "image/jpeg"},
     ],
 }
 response = model.invoke([message])
