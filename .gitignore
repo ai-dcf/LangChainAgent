@@ -21,3 +21,4 @@ __pycache__/
 /agent/实战-AI私厨管家/resources/personal_chief.db
 /agent/实战-AI私厨管家/resources/personal_chief.db-shm
 /agent/实战-AI私厨管家/resources/personal_chief.db-wal
+.workbuddy/
