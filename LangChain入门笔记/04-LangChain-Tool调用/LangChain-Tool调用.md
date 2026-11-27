@@ -588,4 +588,4 @@ OCR 工具对接 `POST https://api.deepseek.com/v1/tools/ocr`，请求是 `multi
 4. 把第三方 API 包成工具时，docstring 写清楚"什么时候用"，异常转成 `ToolException`，错误才能作为消息回到 Agent。
 5. 文件和命令类工具在本文只是最小实现，只用于讲清定义方式；真实环境需要自己做隔离与权限控制。
 
-下一篇转到 MCP：外部工具还可以按标准协议接进来。[LangChain 的 MCP 调用](../05-LangChain-MCP调用/LangChain-MCP调用.md)
+下一篇会把本篇的搜索工具接进 AI 私厨，做出能推荐菜谱、支持追问的应用。[LangChain 入门笔记 05 - AI私厨项目实战](../05-AI私厨项目实战/05-AI私厨项目实战.md)

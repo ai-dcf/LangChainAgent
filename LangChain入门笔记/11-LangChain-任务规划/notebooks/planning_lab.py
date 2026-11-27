@@ -1,4 +1,4 @@
-"""第 10 篇的小型教学辅助：资料、模型初始化和输出观察，不代替 Agent 循环。"""
+"""第 11 篇的小型教学辅助：资料、模型初始化和输出观察，不代替 Agent 循环。"""
 import json
 import os
 from pathlib import Path

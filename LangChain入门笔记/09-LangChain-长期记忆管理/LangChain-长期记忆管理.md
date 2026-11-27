@@ -1,4 +1,4 @@
-# 8. LangChain 长期记忆管理
+# 9. LangChain 长期记忆管理
 
 上一章，我们通过 Checkpointer 保存了会话历史。同一个 `thread_id` 下，Agent 可以看到之前的消息；如果使用数据库保存，还能在程序重启后继续原来的会话。
 
@@ -12,7 +12,7 @@
 
 本章以用户偏好为例，依次学习 Store 基础操作、Agent 跨会话读写，以及 SQLite 持久化。实现依据是 [LangChain 长期记忆文档](https://docs.langchain.com/oss/python/langchain/long-term-memory)，使用当前项目中的 `create_agent`、`ToolRuntime` 和 LangGraph Store 接口。
 
-## 8.1 长期记忆与短期记忆有什么区别
+## 9.1 长期记忆与短期记忆有什么区别
 
 两者主要按**使用范围**区分，而不是按“保存多久”区分。
 
@@ -45,12 +45,12 @@ flowchart TD
 
 绑定 Store 只提供存储能力，不会自动把所有对话写成长期记忆，也不会自动把全部记忆注入提示词。本章通过工具明确完成读写。
 
-## 8.2 运行准备与示例目录
+## 9.2 运行准备与示例目录
 
 在项目根目录执行 `uv sync`，然后在 Jupyter 中选择项目 `.venv` 对应的 Python 内核。本章使用项目已有依赖，无需安装 PostgreSQL，也无需升级依赖。
 
 ```text
-08-LangChain-长期记忆管理/
+09-LangChain-长期记忆管理/
 ├── LangChain-长期记忆管理.md
 ├── notebooks/
 │   ├── 01-长期记忆-InMemoryStore基础.ipynb
@@ -83,9 +83,9 @@ model = init_chat_model(
 
 实际模型权限以账号为准。如果该模型不可用，请换成账号可用、支持工具调用的模型。真实调用会产生 API 费用；Notebook 不会打印密钥。运行 Notebook 时，请将内核工作目录设置为本章 `notebooks/`。所有路径都相对于该目录：使用 `../../../.env` 加载环境变量，使用 `../data/` 保存数据库，不计算项目绝对路径。路径初始化单元会检查工作目录，避免误将数据库写入其他位置。
 
-## 8.3 用 Store 组织长期记忆
+## 9.3 用 Store 组织长期记忆
 
-### 8.3.1 namespace、key 和 value
+### 9.3.1 namespace、key 和 value
 
 把 Store 理解为一个按目录组织的文档库：
 
@@ -104,7 +104,7 @@ users/
 
 同一个 namespace 和 key 确定一条记忆。Alice 和 Bob 可以使用相同的 key，因为用户目录不同。每个偏好独立保存，也便于只修改或删除其中一项。
 
-### 8.3.2 新增、读取和更新
+### 9.3.2 新增、读取和更新
 
 ```python
 from langgraph.store.memory import InMemoryStore
@@ -142,7 +142,7 @@ store.put(profile_ns, "basic", {**old_value, "language": "中文"})
 
 这种读后写适合单线程教学；多个请求同时修改同一文档时可能覆盖彼此的更新，实际系统需要事务或相应的并发控制。
 
-### 8.3.3 列举、过滤和删除
+### 9.3.3 列举、过滤和删除
 
 ```python
 items = store.search(namespace, limit=10)
@@ -161,11 +161,11 @@ assert store.get(namespace, "favorite_animal") is None
 
 本章没有配置 Embedding 索引，所以这里是列举和字段过滤，不能把 `search()` 的名称理解为已经具备语义相似度检索。语义检索需要额外配置嵌入模型和索引。
 
-## 8.4 让 Agent 读写长期记忆
+## 9.4 让 Agent 读写长期记忆
 
 本节的关键是：**应用注入用户身份，工具根据身份读写 Store，模型选择何时调用工具。**
 
-### 8.4.1 应用传入 Context
+### 9.4.1 应用传入 Context
 
 ```python
 from dataclasses import dataclass
@@ -181,7 +181,7 @@ PreferenceKey = Literal["favorite_animal", "response_style"]
 
 `Context` 保存本次运行的应用上下文，不是聊天消息。Notebook 中手动指定用户只是为了演示；真实服务应从登录态中获取 user_id，不能直接相信用户消息里声称的身份。
 
-### 8.4.2 工具访问 runtime.store
+### 9.4.2 工具访问 runtime.store
 
 下面展示读取工具的核心代码，完整版本还包括缺失 Store 检查、保存和删除工具，见 Notebook 02。
 
@@ -210,7 +210,7 @@ def get_preference(key: PreferenceKey, runtime: ToolRuntime[Context]) -> dict:
 
 工具只允许 `favorite_animal` 和 `response_style` 两种键，避免示例扩展成任意资料写入系统。保存前还会检查值不能是空字符串。
 
-### 8.4.3 同时绑定 Store 和 Checkpointer
+### 9.4.3 同时绑定 Store 和 Checkpointer
 
 Notebook 定义 `TOOLS` 和 `SYSTEM_PROMPT` 后创建 Agent：
 
@@ -238,7 +238,7 @@ result = agent.invoke(
 
 这些提示词用于引导模型，并不能强制保证业务授权。高要求系统应在应用层增加确定性的意图确认、字段校验与访问控制。
 
-## 8.5 验证跨会话共享与用户隔离
+## 9.5 验证跨会话共享与用户隔离
 
 Notebook 02 按以下顺序运行，保存值分别固定为“猫”和“兔子”，方便核对断言：
 
@@ -266,7 +266,7 @@ Notebook 02 按以下顺序运行，保存值分别固定为“猫”和“兔�
 
 真实模型的工具选择存在不确定性。如果断言失败，先观察本次工具结果、模型是否支持工具调用、是否返回了不同的偏好值，再定位原因。不要简单删除断言，把模型的口头承诺当作成功。
 
-## 8.6 用 SQLite 持久化长期记忆
+## 9.6 用 SQLite 持久化长期记忆
 
 `InMemoryStore` 在进程退出后不会保留数据。要验证重启恢复，需要换成数据库后端。本项目已有的 `langgraph-checkpoint-sqlite` 提供 `SqliteStore`，无需额外数据库服务。
 
@@ -317,7 +317,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver     # 传给 checkpointer=
 
 本章只把长期记忆持久化，Checkpointer 仍使用内存实现。如果希望原会话历史也在重启后恢复，需要另行配置 `SqliteSaver`。SQLite 适合本地学习和轻量应用，生产选型还要考虑并发、部署方式和备份要求。
 
-## 8.7 如何管理记忆，以及常见误区
+## 9.7 如何管理记忆，以及常见误区
 
 ### 保存什么、什么时候保存
 
@@ -347,7 +347,7 @@ from langgraph.checkpoint.sqlite import SqliteSaver     # 传给 checkpointer=
 
 写入也可以发生在当前请求流程中，或者由后台任务提取。本章使用前者，便于观察工具读写；后台提取可以降低当前请求的等待时间，但还需要处理提取延迟、重复、冲突和失败重试。本章不引入这些额外组件。
 
-## 8.8 本章验证记录
+## 9.8 本章验证记录
 
 路径调整后，已从本章 `notebooks/` 工作目录验证相对路径加载与 SQLite 关闭重连恢复。
 

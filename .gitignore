@@ -6,18 +6,18 @@
 __pycache__/
 
 # Local checkpoint database
-/LangChain入门笔记/07-LangChain-短期记忆与存储策略/notebools/checkpoints.sqlite*
+/LangChain入门笔记/08-LangChain-短期记忆与存储策略/notebools/checkpoints.sqlite*
 
-# Chapter 08 local long-term memory databases
-/LangChain入门笔记/08-LangChain-长期记忆管理/data/*.sqlite*
+# Chapter 09 local long-term memory databases
+/LangChain入门笔记/09-LangChain-长期记忆管理/data/*.sqlite*
 
-# Chapter 09 generated files, source records, databases and verification artifacts
-/LangChain入门笔记/09-LangChain-上下文管理/data/
-/LangChain入门笔记/09-LangChain-上下文管理/notebooks/__pycache__/
+# Chapter 10 generated files, source records, databases and verification artifacts
+/LangChain入门笔记/10-LangChain-上下文管理/data/
+/LangChain入门笔记/10-LangChain-上下文管理/notebooks/__pycache__/
 
-# Chapter 10 local model traces and verification reports
-/LangChain入门笔记/10-LangChain-任务规划/data/
-/LangChain入门笔记/10-LangChain-任务规划/notebooks/__pycache__/
+# Chapter 11 local model traces and verification reports
+/LangChain入门笔记/11-LangChain-任务规划/data/
+/LangChain入门笔记/11-LangChain-任务规划/notebooks/__pycache__/
 /agent/实战-AI私厨管家/resources/personal_chief.db
 /agent/实战-AI私厨管家/resources/personal_chief.db-shm
 /agent/实战-AI私厨管家/resources/personal_chief.db-wal
